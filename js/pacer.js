@@ -99,38 +99,43 @@ function animatePacer(timestamp) {
     const dt = timestamp - lastFrameTime;
     lastFrameTime = timestamp;
 
-    // 1. Smoothly interpolate currentRenderSPM towards targetSPM
-    // The 0.05 factor determines how fast it adapts. Lower = smoother/slower.
-    // 0.05 @ 60fps is about 1-2 seconds to fully switch.
+    // --- FIX: TIME-BASED SMOOTHING ---
+    
+    // We normalize the speed to a standard 60 FPS (approx 16.67ms per frame).
+    // If running at 120 FPS, dt will be ~8.33ms, so timeRatio will be 0.5.
+    // If running at 30 FPS, dt will be ~33.3ms, so timeRatio will be 2.0.
+    const timeRatio = dt / 16.67;
+
     const diff = targetSPM - currentRenderSPM;
+    
     if (Math.abs(diff) > 0.01) {
-        currentRenderSPM += diff * 0.02; 
+        // Multiply the base factor (0.02) by the timeRatio
+        // This guarantees the visual speed is consistent on all devices.
+        currentRenderSPM += diff * (0.008 * timeRatio); 
     } else {
         currentRenderSPM = targetSPM;
     }
 
-    // Update Text UI with the smoothed value so user sees it changing
+    // ---------------------------------
+
+    // Update Text UI with the smoothed value
     if(dom.driveTime) {
-        // Just showing the target in the UI usually feels better than showing the moving decimal
-        // But updating the timings is useful:
         const liveData = getInterpolatedStrokeData(currentRenderSPM);
         dom.driveTime.textContent = liveData.drive.toFixed(2) + 's';
         dom.recovTime.textContent = liveData.recovery.toFixed(2) + 's';
     }
 
-    // 2. Calculate Cycle Duration for this specific frame
+    // 2. Calculate Cycle Duration
     const data = getInterpolatedStrokeData(currentRenderSPM);
     const totalCycleMs = (data.drive + data.recovery) * 1000;
     const driveRatio = (data.drive * 1000) / totalCycleMs;
 
     // 3. Advance Progress based on Delta Time
-    // (dt / totalCycleMs) is the percentage of the stroke completed this frame
     cycleProgress += dt / totalCycleMs;
 
     // Loop logic
     if (cycleProgress >= 1.0) {
         cycleProgress -= 1.0;
-        // Just wrapped around? That's the Catch.
         currentPhase = 'drive'; 
         dom.phaseName.textContent = "DRIVE";
         dom.phaseName.className = "phase-name drive";
@@ -140,33 +145,25 @@ function animatePacer(timestamp) {
 
     // 4. Determine Position based on Phase
     if (cycleProgress < driveRatio) {
-        // --- DRIVE PHASE ---
+        // DRIVE PHASE
         if (currentPhase !== 'drive') {
             currentPhase = 'drive';
             dom.phaseName.textContent = "DRIVE";
             dom.phaseName.className = "phase-name drive";
             dom.rowerDot.className = "rower-dot drive";
         }
-
-        // Normalize progress within Drive (0.0 to 1.0)
         const driveProgress = cycleProgress / driveRatio;
-        
-        // CSS Left: 10px to (100% - 40px)
         dom.rowerDot.style.left = `calc(10px + (${driveProgress} * (100% - 50px)))`;
 
     } else {
-        // --- RECOVERY PHASE ---
+        // RECOVERY PHASE
         if (currentPhase !== 'recovery') {
             currentPhase = 'recovery';
             dom.phaseName.textContent = "RECOVERY";
             dom.phaseName.className = "phase-name recovery";
             dom.rowerDot.className = "rower-dot recovery";
         }
-
-        // Normalize progress within Recovery (0.0 to 1.0)
         const recoveryProgress = (cycleProgress - driveRatio) / (1 - driveRatio);
-        
-        // CSS Left: (100% - 40px) back to 10px
         dom.rowerDot.style.left = `calc((100% - 40px) - (${recoveryProgress} * (100% - 50px)))`;
     }
 

@@ -218,7 +218,7 @@ handleIntervalLogic(totalElapsedS, totalElapsedM) {
     if (currentInt.type === 'time') {
         const targetS = currentInt.val * 60;
         remainingMetric = targetS - segElapsedS; // Seconds left
-        anticipationThreshold = 5; // Start transitioning 5 seconds before end
+        anticipationThreshold = 10; // Start transitioning 10 seconds before end
         
         progressPct = segElapsedS / targetS;
         remainingTxt = Utils.formatTime(Math.max(0, remainingMetric * 1000));
@@ -226,7 +226,7 @@ handleIntervalLogic(totalElapsedS, totalElapsedM) {
     } else {
         const targetM = currentInt.val;
         remainingMetric = targetM - segElapsedM; // Meters left
-        anticipationThreshold = 25; // Start transitioning 25 meters before end
+        anticipationThreshold = 35; // Start transitioning 35 meters before end
 
         progressPct = segElapsedM / targetM;
         remainingTxt = Math.floor(Math.max(0, remainingMetric)) + "m";
