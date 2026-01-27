@@ -99,7 +99,7 @@ function animatePacer() {
         }
         
         const progress = elapsed / driveMs; 
-        dom.rowerDot.style.left = `calc(10px + (${progress} * (100% - 80px)))`;
+        dom.rowerDot.style.left = `calc(10px + (${progress} * (100% - 50px)))`;
         
     } else {
         // RECOVERY PHASE
@@ -114,7 +114,7 @@ function animatePacer() {
         const progress = recovElapsed / recovMs; 
         
         // Return stroke (Right to Left)
-        dom.rowerDot.style.left = `calc((100% - 70px) - (${progress} * (100% - 80px)))`;
+        dom.rowerDot.style.left = `calc((100% - 40px) - (${progress} * (100% - 50px)))`;
     }
 
     pacerAnimationFrame = requestAnimationFrame(animatePacer);
