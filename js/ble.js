@@ -20,7 +20,6 @@ const strokeTimestamps = [];
 let initialStrokeCount = null;
 let lastStrokeCount = null;
 let currentSPM = null;
-let deviceAvgSR = null;
 let deviceInstantSPM = null;
 let spmSource = "none";
 
@@ -91,14 +90,9 @@ function calculateStableSPM() {
         if (currentSPM === null || currentSPM === 0) return filteredDeviceSPM;
         return (0.6 * filteredDeviceSPM) + (0.4 * currentSPM);
     }
-    
-    // 2. Device Average Fallback
-    if (deviceAvgSR !== null && deviceAvgSR > 0) {
-        spmSource = "average";
-        return deviceAvgSR;
-    }
-    
-    return currentSPM || null;
+       
+    spmSource = "calculating";
+    return null; 
 }
 
 function onStrokeDetected(sc, timestamp) {
@@ -186,7 +180,6 @@ function handleRowerData(ev) {
 
     // 3. Average SPM
     if (AVG_SR && data.byteLength >= offset + 1) {
-        deviceAvgSR = data.getUint8(offset) / 2;
         offset += 1;
     }
 

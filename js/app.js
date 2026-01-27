@@ -60,6 +60,7 @@ const WorkoutManager = {
         this.config = config;
         this.status = 'idle';
         this.currentIntervalIndex = 0;
+        this.intervalSnapshot = null; // Forget previous interval history
         this.updateTargetDisplay();
 
         // --- RESET UI LOGIC ---
@@ -484,16 +485,17 @@ el.logBtn.addEventListener('click', () => Utils.saveRawLog(BLE.getRawLog()));
 el.debugBtn.addEventListener('click', () => el.debugEl.style.display = el.debugEl.style.display === 'none' ? 'block' : 'none');
 
 // --- BLE LOOP ---
-
 BLE.setCallback((data) => {
-    // 1. Update Raw Stats (SPM and Pace are always instant, so they are fine)
+    // 1. Update Raw Stats
     if (data.spm !== null) {
         el.spm.textContent = (Math.round(data.spm * 2) / 2).toFixed(1);
-        el.spmSource.textContent = data.spmSource === "filtered" ? "Filtered Data" : "Device Avg";
-        el.spmSource.className = `spm-source ${data.spmSource}`;
+        el.spmSource.textContent = "Filtered Data"; // Simplified, since we removed Average
+        el.spmSource.className = `spm-source filtered`;
     } else {
         el.spm.textContent = '--';
-        el.spmSource.textContent = data.workoutActive ? 'Waiting...' : 'Idle';
+        // Check workoutActive. If active, we are calculating. If not, we are Idle.
+        el.spmSource.textContent = data.workoutActive ? 'Calculating...' : 'Idle';
+        el.spmSource.className = 'spm-source';
     }
 
     if(data.pace) el.pace.textContent = data.pace;
