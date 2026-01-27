@@ -1,0 +1,31 @@
+# --- System Files ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+
+# --- IDE & Editor Settings ---
+# Keep your personal editor configs out of the repo
+.vscode/
+.idea/
+*.sublime-workspace
+
+# --- App Specific Data ---
+# CRITICAL: Do not commit your exported workout logs!
+*.csv
+rowing_data_*.csv
+raw_rowing_data_*.csv
+
+# --- Dependencies & Logs ---
+# (In case you add npm/prettier/eslint later)
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# --- Build Outputs ---
+# (In case you add a bundler later)
+dist/
+build/
+CodeFlattened_Output
