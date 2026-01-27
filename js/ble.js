@@ -3,7 +3,7 @@ import { buf2hex, log } from './utils.js';
 const FTMS_SERVICE = 0x1826;
 const ROWING_DATA_CHAR = 0x2AD1;
 const UINT16_MAX = 0x10000;
-const IDLE_RESET_MS = 3500;
+const IDLE_RESET_MS = 6000;
 const ROWING_ACTIVITY_THRESHOLD_MS = 8000;
 const STOP_TIMEOUT_MS = 8000;
 const DEVICE_SPM_VALID_RANGE = { min: 12, max: 48 };
