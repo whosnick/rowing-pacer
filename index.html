@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <title>Rowing Logger v3.0</title>
+    <meta name="theme-color" content="#0f2027"/>
+    <meta name="description" content="Visual Pacer and Data Logger for Merach Rowers">
+
+    <!-- PWA Setup -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div class="header">
+        <h1>Rowing Logger v3.0</h1>
+        <button id="connectBtn">Connect BLE</button>
+    </div>
+
+    <div class="main">
+        <!-- PACER UI -->
+        <div class="pacer-container">
+            <div class="phase-display">
+                <div class="phase-label">CURRENT PHASE</div>
+                <div id="phaseName" class="phase-name drive">READY</div>
+            </div>
+            
+            <div class="rowing-track">
+                <div id="rowerDot" class="rower-dot drive"></div>
+            </div>
+
+            <div class="timing-stats">
+                <span>Drive: <span id="driveTime">0.00s</span></span>
+                <span>Recov: <span id="recovTime">0.00s</span></span>
+            </div>
+
+            <div class="spm-control-panel">
+                <div class="spm-header">
+                    <span style="font-size:12px;opacity:0.7">TARGET PACE</span>
+                    <span class="spm-value-display"><span id="targetSPMVal">20</span> <span style="font-size:14px;opacity:0.7">SPM</span></span>
+                </div>
+                <input type="range" id="spmSlider" class="spm-slider" min="16" max="32" step="1" value="20">
+            </div>
+
+            <button id="pacerBtn" class="pacer-btn start">Start Pacer</button>
+        </div>
+
+        <!-- DATA STATS -->
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-label">Pace / 500m</div>
+                <div id="pace" class="stat-value">--:--</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Actual SPM</div>
+                <div id="spm" class="stat-value">--</div>
+                <div id="spmSource" class="spm-source">Idle</div>
+            </div>
+        </div>
+
+        <div class="stats-secondary">
+            <div class="stat-sm">
+                <div class="label">Time</div>
+                <div id="workoutTime" class="value">00:00</div>
+            </div>
+            <div class="stat-sm">
+                <div class="label">Strokes</div>
+                <div id="strokeCount" class="value">0</div>
+            </div>
+            <div class="stat-sm">
+                <div class="label">Dist</div>
+                <div id="distance" class="value">0m</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="audioBtn" class="icon-btn">🔊 Sound</button>
+            <button id="logBtn" class="icon-btn">💾 Log</button>
+            <button id="debugBtn" class="icon-btn">🐛 Debug</button>
+        </div>
+
+        <div id="debug" class="debug"></div>
+    </div>
+
+    <!-- Main Application Logic -->
+    <script type="module" src="js/app.js"></script>
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(() => console.log('Service Worker Registered'));
+        }
+    </script>
+</body>
+</html>
