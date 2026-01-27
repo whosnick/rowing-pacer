@@ -7,22 +7,22 @@ const el = {
     // Views
     setupView: document.getElementById('setupView'),
     workoutView: document.getElementById('workoutView'),
-    
+
     // Setup Inputs
     workoutType: document.getElementById('workoutType'),
     workoutSettings: document.getElementById('workoutSettings'),
     startWorkoutBtn: document.getElementById('startWorkoutBtn'),
-    
+
     // Workout Display
     progressLabelLeft: document.getElementById('progressLabelLeft'),
     progressLabelRight: document.getElementById('progressLabelRight'),
     progressBarMain: document.getElementById('progressBarMain'),
     intervalProgressContainer: document.getElementById('intervalProgressContainer'),
     progressBarInterval: document.getElementById('progressBarInterval'),
-    
+
     targetSPMVal: document.getElementById('targetSPMVal'),
     stopWorkoutBtn: document.getElementById('stopWorkoutBtn'),
-    
+
     // Stats
     spm: document.getElementById('spm'),
     spmSource: document.getElementById('spmSource'),
@@ -30,7 +30,7 @@ const el = {
     strokeCount: document.getElementById('strokeCount'),
     distance: document.getElementById('distance'),
     workoutTime: document.getElementById('workoutTime'),
-    
+
     // System
     connectBtn: document.getElementById('connectBtn'),
     audioBtn: document.getElementById('audioBtn'),
@@ -52,9 +52,9 @@ const WorkoutManager = {
     status: 'idle', // idle, active, finished
     startTime: null,
     currentIntervalIndex: 0,
-    
+
     // Snapshot of BLE data at start of workout/interval
-    startSnapshot: { time: 0, dist: 0 }, 
+    startSnapshot: { time: 0, dist: 0 },
 
     init(config) {
         this.config = config;
@@ -70,8 +70,8 @@ const WorkoutManager = {
         this.status = 'active';
         this.startSnapshot = { ...BLE.getLastKnownData() };
         Pacer.startPacer(); // Ensure pacer animation loop is running
-        
-        // If interval, we might need specific logic per segment, 
+
+        // If interval, we might need specific logic per segment,
         // but for now, we just rely on the update loop.
         Utils.log("Workout Started (Active)");
     },
@@ -79,12 +79,12 @@ const WorkoutManager = {
     stop(finished = false) {
         this.status = 'finished';
         Pacer.stopPacer();
-        
+
         el.stopWorkoutBtn.textContent = finished ? "Workout Complete! (New?)" : "New Workout";
         el.stopWorkoutBtn.classList.add('reset');
-        
+
         if (finished) {
-            Utils.beep(); 
+            Utils.beep();
             setTimeout(() => Utils.beep(), 200);
             setTimeout(() => Utils.beep(), 400);
         }
@@ -104,8 +104,8 @@ const WorkoutManager = {
         // Auto-Start Logic
         if (this.status === 'idle' && bleData.workoutActive) {
             this.start();
-        } 
-        
+        }
+
         // Auto-Stop Logic (Idle timeout handled by BLE, but we reflect it here)
         if (this.status === 'active' && !bleData.workoutActive) {
             // BLE says workout stopped (8s idle)
@@ -123,14 +123,14 @@ const WorkoutManager = {
         if (this.config.type === 'time') {
             const targetS = this.config.value * 60;
             const remaining = Math.max(0, targetS - elapsedS);
-            
+
             this.updateProgressUI(elapsedS, targetS, Utils.formatTime(remaining * 1000));
             if (elapsedS >= targetS) this.stop(true);
 
         } else if (this.config.type === 'distance') {
             const targetM = this.config.value;
             const remaining = Math.max(0, targetM - elapsedM);
-            
+
             this.updateProgressUI(elapsedM, targetM, remaining + "m");
             if (elapsedM >= targetM) this.stop(true);
 
@@ -143,10 +143,10 @@ const WorkoutManager = {
         // Simple logic: We assume intervals are time or distance based.
         // For complex interval logic (Work/Rest), we need to track local start times.
         // However, given the prompt's structure, let's treat intervals as sequential segments.
-        
-        // Note: To do this accurately with BLE accumulation, we really need to snapshot 
+
+        // Note: To do this accurately with BLE accumulation, we really need to snapshot
         // at the start of *each* interval.
-        
+
         // Refactoring for Intervals:
         // We need a local snapshot for the current interval
         if (!this.intervalSnapshot) {
@@ -160,7 +160,7 @@ const WorkoutManager = {
         const currentBle = BLE.getLastKnownData();
         const segElapsedS = (currentBle.time - this.intervalSnapshot.time) / 1000;
         const segElapsedM = currentBle.distance - this.intervalSnapshot.distance;
-        
+
         const currentInt = this.config.intervals[this.currentIntervalIndex];
         let isDone = false;
         let progressPct = 0;
@@ -182,7 +182,7 @@ const WorkoutManager = {
         el.progressLabelLeft.textContent = `Interval ${this.currentIntervalIndex + 1}/${this.config.intervals.length}`;
         el.progressLabelRight.textContent = remainingTxt;
         el.progressBarInterval.style.width = `${Math.min(100, progressPct * 100)}%`;
-        
+
         // Main bar represents total intervals done
         const totalProgress = ((this.currentIntervalIndex + progressPct) / this.config.intervals.length) * 100;
         el.progressBarMain.style.width = `${totalProgress}%`;
@@ -252,16 +252,16 @@ function generateSetupUI() {
     if (type === 'time') {
         // 10 to 60 in 5er steps
         container.appendChild(createSelect("Duration", "setupVal", rangeOpts(10, 60, 5, " min")));
-    } 
+    }
     else if (type === 'distance') {
         // 500 to 10000 in 500er steps
         container.appendChild(createSelect("Distance", "setupVal", rangeOpts(500, 10000, 500, " m")));
-    } 
+    }
     else if (type === 'interval') {
         // Count 2 to 10
         const countHtml = `<div class="form-group"><label>Number of Intervals</label><select id="setupCount">${rangeOpts(2,10,1).map(o=>`<option value="${o.v}">${o.t}</option>`).join('')}</select></div>`;
         container.innerHTML += countHtml;
-        
+
         // Type
         container.appendChild(createSelect("Interval Type", "setupIntType", [{v:'time', t:'Time (min)'}, {v:'dist', t:'Distance (m)'}]));
 
@@ -269,7 +269,7 @@ function generateSetupUI() {
         const valContainer = document.createElement('div');
         valContainer.id = "intValContainer";
         container.appendChild(valContainer);
-        
+
         // SPM Container
         const rowsContainer = document.createElement('div');
         rowsContainer.id = "intRows";
@@ -278,19 +278,23 @@ function generateSetupUI() {
         const updateIntervalRows = () => {
             const count = document.getElementById('setupCount').value;
             const intType = document.getElementById('setupIntType').value;
-            
-            // Value Selector
-            let valOpts = intType === 'time' ? rangeOpts(1, 10, 1, " min") : rangeOpts(100, 2000, 100, " m");
-            valContainer.innerHTML = `<div class="form-group"><label>Interval Value</label><select id="setupIntVal">${valOpts.map(o=>`<option value="${o.v}">${o.t}</option>`).join('')}</select></div>`;
 
-            // SPM Rows
-            let html = '<label style="font-size:12px;color:rgba(255,255,255,0.6);text-transform:uppercase">Target SPM per Interval</label>';
+            // Remove the single value selector
+            valContainer.innerHTML = '';
+
+            // Create rows with BOTH value and SPM per interval
+            let html = '<label style="font-size:12px;color:rgba(255,255,255,0.6);text-transform:uppercase;margin-bottom:8px;display:block;">Configure Each Interval</label>';
+            let valOpts = intType === 'time' ? rangeOpts(1, 10, 1, " min") : rangeOpts(100, 2000, 100, " m");
+            
             for(let i=1; i<=count; i++) {
                 html += `
                 <div class="interval-row">
                     <span>Interval ${i}</span>
+                    <select class="int-val-select">
+                        ${valOpts.map(o => `<option value="${o.v}">${o.t}</option>`).join('')}
+                    </select>
                     <select class="int-spm-select">
-                        ${rangeOpts(16,32,1).map(o => `<option value="${o.v}" ${o.v===20?'selected':''}>${o.t}</option>`).join('')}
+                        ${rangeOpts(16,32,1).map(o => `<option value="${o.v}" ${o.v===20?'selected':''}>${o.t} SPM</option>`).join('')}
                     </select>
                 </div>`;
             }
@@ -343,15 +347,15 @@ el.startWorkoutBtn.addEventListener('click', () => {
     } else {
         // Interval Config Construction
         config.intervals = [];
-        const intVal = parseInt(document.getElementById('setupIntVal').value);
         const intType = document.getElementById('setupIntType').value;
+        const valSelects = document.querySelectorAll('.int-val-select');
         const spmSelects = document.querySelectorAll('.int-spm-select');
-        
-        spmSelects.forEach(sel => {
+
+        valSelects.forEach((valSel, idx) => {
             config.intervals.push({
                 type: intType,
-                val: intVal,
-                spm: parseInt(sel.value)
+                val: parseInt(valSel.value),
+                spm: parseInt(spmSelects[idx].value)
             });
         });
         el.intervalProgressContainer.classList.remove('hidden');
@@ -359,7 +363,7 @@ el.startWorkoutBtn.addEventListener('click', () => {
 
     WorkoutManager.init(config);
     toggleView('workout');
-    
+
     // Check if we should auto-start immediately (if already rowing)
     const lastData = BLE.getLastKnownData();
     if (lastData && lastData.workoutActive) {
@@ -411,7 +415,7 @@ BLE.setCallback((data) => {
         el.spm.textContent = '--';
         el.spmSource.textContent = data.workoutActive ? 'Waiting...' : 'Idle';
     }
-    
+
     if(data.strokes) el.strokeCount.textContent = data.strokes;
     if(data.distance) el.distance.textContent = data.distance + 'm';
     if(data.pace) el.pace.textContent = data.pace;

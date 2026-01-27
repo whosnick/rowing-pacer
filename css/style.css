@@ -37,13 +37,13 @@ body{background:linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);c
 }
 .setup-hint { text-align: center; font-size: 11px; color: var(--muted); margin-top: 5px; }
 
-/* Dynamic Interval Rows */
+/* Dynamic Interval Rows - Updated for two selectors */
 .interval-row {
     display: flex; justify-content: space-between; align-items: center;
-    background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; margin-bottom: 5px;
+    background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; margin-bottom: 5px; gap: 8px;
 }
-.interval-row span { font-size: 12px; opacity: 0.8; }
-.interval-row select { padding: 4px; font-size: 14px; width: 80px; }
+.interval-row span { font-size: 12px; opacity: 0.8; min-width: 70px; }
+.interval-row select { padding: 6px; font-size: 14px; flex: 1; min-width: 90px; background: var(--input-bg); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; }
 
 /* --- WORKOUT VIEW --- */
 
