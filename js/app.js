@@ -215,36 +215,67 @@ const WorkoutManager = {
         let isDone = false;
         let progressPct = 0;
         let remainingTxt = "";
+        
+        // Variables for anticipation
+        let remainingMetric = 0; 
+        let anticipationThreshold = 0;
 
         if (currentInt.type === 'time') {
             const targetS = currentInt.val * 60;
+            remainingMetric = targetS - segElapsedS; // Seconds left
+            anticipationThreshold = 5; // Start transitioning 5 seconds before end
+            
             progressPct = segElapsedS / targetS;
-            remainingTxt = Utils.formatTime((targetS - segElapsedS) * 1000);
+            remainingTxt = Utils.formatTime(remainingMetric * 1000);
             if (segElapsedS >= targetS) isDone = true;
         } else {
             const targetM = currentInt.val;
+            remainingMetric = targetM - segElapsedM; // Meters left
+            anticipationThreshold = 25; // Start transitioning 25 meters before end
+
             progressPct = segElapsedM / targetM;
-            remainingTxt = Math.floor(targetM - segElapsedM) + "m";
+            remainingTxt = Math.floor(remainingMetric) + "m";
             if (segElapsedM >= targetM) isDone = true;
         }
 
-        // Update UI
+        // --- NEW: ANTICIPATION LOGIC ---
+        // If we are close to the end, and there is a next interval, 
+        // tell the Pacer to start moving towards the NEXT SPM.
+        if (!isDone && remainingMetric <= anticipationThreshold) {
+            const nextIdx = this.currentIntervalIndex + 1;
+            if (nextIdx < this.config.intervals.length) {
+                const nextSPM = this.config.intervals[nextIdx].spm;
+                // Update Pacer early. The pacer.js smoothing logic will handle the curve.
+                Pacer.setTargetSPM(nextSPM);
+                
+                // Optional: Visually indicate "Transitioning"
+                el.targetSPMVal.style.color = "var(--accent)"; 
+                el.targetSPMVal.textContent = `${nextSPM} (Next)`;
+            }
+        } else if (!isDone) {
+            // Ensure we are on current target (in case we backed out of a transition?)
+            Pacer.setTargetSPM(currentInt.spm);
+            el.targetSPMVal.style.color = "inherit";
+            el.targetSPMVal.textContent = currentInt.spm;
+        }
+        // -------------------------------
+
+        // Update UI (Keep existing UI update code)
         el.progressLabelLeft.textContent = `Interval ${this.currentIntervalIndex + 1}/${this.config.intervals.length}`;
         el.progressLabelRight.textContent = remainingTxt;
         el.progressBarInterval.style.width = `${Math.min(100, progressPct * 100)}%`;
 
-        // Main bar represents total intervals done
-        const totalProgress = ((this.currentIntervalIndex + progressPct) / this.config.intervals.length) * 100;
-        el.progressBarMain.style.width = `${totalProgress}%`;
-
+        // ... (Rest of function: Main bar progress, isDone check) ...
+        // Note: In the isDone block, reset the color
         if (isDone) {
             this.currentIntervalIndex++;
             if (this.currentIntervalIndex >= this.config.intervals.length) {
                 this.stop(true);
             } else {
                 // Next Interval
-                Utils.beep(); // Signal change
-                this.intervalSnapshot = null; // Will trigger reset next frame
+                Utils.beep();
+                this.intervalSnapshot = null;
+                el.targetSPMVal.style.color = "inherit"; // Reset color
             }
         }
     },

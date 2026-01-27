@@ -22,9 +22,14 @@ const strokeData = {
 
 let pacerRunning = false;
 let pacerAnimationFrame = null;
-let pacerStartTime = 0;
+
+// Animation State
+let lastFrameTime = 0;
+let cycleProgress = 0; // 0.0 to 1.0 (0=Catch, 1=Finish)
+let currentRenderSPM = 20; // The actual float SPM being rendered (e.g. 20.4)
+let targetSPM = 20; // The goal SPM
+
 let currentPhase = 'drive';
-let targetSPM = 20;
 
 // DOM Elements cache
 let dom = {};
@@ -35,23 +40,22 @@ export const initPacer = (elements) => {
 
 export const setTargetSPM = (spm) => {
     targetSPM = spm;
-    const data = strokeData[targetSPM];
-    if(data && dom.driveTime && dom.recovTime) {
-        dom.driveTime.textContent = data.drive.toFixed(2) + 's';
-        dom.recovTime.textContent = data.recovery.toFixed(2) + 's';
-    }
+    // We do NOT update the text immediately here anymore, 
+    // we let the animation loop update it as it smoothly transitions.
 };
 
 export const startPacer = () => {
-    if (pacerRunning) return; // Prevent double start
+    if (pacerRunning) return; 
     pacerRunning = true;
-    // dom.btn.textContent ... REMOVE button text logic as button is gone
-    pacerStartTime = performance.now();
+    
+    lastFrameTime = performance.now();
+    currentRenderSPM = targetSPM; // Start exactly on target
+    cycleProgress = 0;
     currentPhase = 'drive';
 
     requestWakeLock();
     ensureAudio();
-    beep(); 
+    beep(); // Initial Beep
     animatePacer();
 };
 
@@ -69,43 +73,101 @@ function resetPacerUI() {
     dom.rowerDot.style.left = "10px";
 }
 
-function animatePacer() {
-    if (!pacerRunning) return;
+function getInterpolatedStrokeData(spm) {
+    // Clamp SPM to data range
+    const safeSPM = Math.max(16, Math.min(32, spm));
+    const lower = Math.floor(safeSPM);
+    const upper = Math.ceil(safeSPM);
+    
+    if (lower === upper) return strokeData[lower];
 
-    const data = strokeData[targetSPM];
-    const driveMs = data.drive * 1000;
-    const recovMs = data.recovery * 1000;
-    const totalCycleMs = driveMs + recovMs;
-    
-    const elapsed = (performance.now() - pacerStartTime) % totalCycleMs;
-    
-    if (elapsed < driveMs) {
-        // DRIVE PHASE
+    // Linear Interpolate between integer steps for smoothness
+    const ratio = safeSPM - lower;
+    const d1 = strokeData[lower];
+    const d2 = strokeData[upper];
+
+    return {
+        drive: d1.drive + (d2.drive - d1.drive) * ratio,
+        recovery: d1.recovery + (d2.recovery - d1.recovery) * ratio
+    };
+}
+
+function animatePacer(timestamp) {
+    if (!pacerRunning) return;
+    if (!timestamp) timestamp = performance.now();
+
+    const dt = timestamp - lastFrameTime;
+    lastFrameTime = timestamp;
+
+    // 1. Smoothly interpolate currentRenderSPM towards targetSPM
+    // The 0.05 factor determines how fast it adapts. Lower = smoother/slower.
+    // 0.05 @ 60fps is about 1-2 seconds to fully switch.
+    const diff = targetSPM - currentRenderSPM;
+    if (Math.abs(diff) > 0.01) {
+        currentRenderSPM += diff * 0.02; 
+    } else {
+        currentRenderSPM = targetSPM;
+    }
+
+    // Update Text UI with the smoothed value so user sees it changing
+    if(dom.driveTime) {
+        // Just showing the target in the UI usually feels better than showing the moving decimal
+        // But updating the timings is useful:
+        const liveData = getInterpolatedStrokeData(currentRenderSPM);
+        dom.driveTime.textContent = liveData.drive.toFixed(2) + 's';
+        dom.recovTime.textContent = liveData.recovery.toFixed(2) + 's';
+    }
+
+    // 2. Calculate Cycle Duration for this specific frame
+    const data = getInterpolatedStrokeData(currentRenderSPM);
+    const totalCycleMs = (data.drive + data.recovery) * 1000;
+    const driveRatio = (data.drive * 1000) / totalCycleMs;
+
+    // 3. Advance Progress based on Delta Time
+    // (dt / totalCycleMs) is the percentage of the stroke completed this frame
+    cycleProgress += dt / totalCycleMs;
+
+    // Loop logic
+    if (cycleProgress >= 1.0) {
+        cycleProgress -= 1.0;
+        // Just wrapped around? That's the Catch.
+        currentPhase = 'drive'; 
+        dom.phaseName.textContent = "DRIVE";
+        dom.phaseName.className = "phase-name drive";
+        dom.rowerDot.className = "rower-dot drive";
+        beep(); 
+    }
+
+    // 4. Determine Position based on Phase
+    if (cycleProgress < driveRatio) {
+        // --- DRIVE PHASE ---
         if (currentPhase !== 'drive') {
             currentPhase = 'drive';
             dom.phaseName.textContent = "DRIVE";
             dom.phaseName.className = "phase-name drive";
             dom.rowerDot.className = "rower-dot drive";
-            beep(); // Audio Cue at Catch
         }
+
+        // Normalize progress within Drive (0.0 to 1.0)
+        const driveProgress = cycleProgress / driveRatio;
         
-        const progress = elapsed / driveMs; 
-        dom.rowerDot.style.left = `calc(10px + (${progress} * (100% - 50px)))`;
-        
+        // CSS Left: 10px to (100% - 40px)
+        dom.rowerDot.style.left = `calc(10px + (${driveProgress} * (100% - 50px)))`;
+
     } else {
-        // RECOVERY PHASE
+        // --- RECOVERY PHASE ---
         if (currentPhase !== 'recovery') {
             currentPhase = 'recovery';
             dom.phaseName.textContent = "RECOVERY";
             dom.phaseName.className = "phase-name recovery";
             dom.rowerDot.className = "rower-dot recovery";
         }
+
+        // Normalize progress within Recovery (0.0 to 1.0)
+        const recoveryProgress = (cycleProgress - driveRatio) / (1 - driveRatio);
         
-        const recovElapsed = elapsed - driveMs;
-        const progress = recovElapsed / recovMs; 
-        
-        // Return stroke (Right to Left)
-        dom.rowerDot.style.left = `calc((100% - 40px) - (${progress} * (100% - 50px)))`;
+        // CSS Left: (100% - 40px) back to 10px
+        dom.rowerDot.style.left = `calc((100% - 40px) - (${recoveryProgress} * (100% - 50px)))`;
     }
 
     pacerAnimationFrame = requestAnimationFrame(animatePacer);
