@@ -62,29 +62,6 @@ export const stopPacer = () => {
     resetPacerUI();
 };
 
-function startPacer() {
-    pacerRunning = true;
-    dom.btn.textContent = "STOP PACER";
-    dom.btn.className = "pacer-btn stop";
-    pacerStartTime = performance.now();
-    currentPhase = 'drive';
-    
-    requestWakeLock();
-    ensureAudio();
-    beep(); // Initial beep
-    animatePacer();
-}
-
-function stopPacer() {
-    pacerRunning = false;
-    dom.btn.textContent = "START PACER";
-    dom.btn.className = "pacer-btn start";
-    
-    releaseWakeLock();
-    if(pacerAnimationFrame) cancelAnimationFrame(pacerAnimationFrame);
-    resetPacerUI();
-}
-
 function resetPacerUI() {
     dom.phaseName.textContent = "READY";
     dom.phaseName.className = "phase-name drive";
