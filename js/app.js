@@ -61,11 +61,45 @@ const WorkoutManager = {
         this.status = 'idle';
         this.currentIntervalIndex = 0;
         this.updateTargetDisplay();
-        this.updateProgressUI(0, 0);
-        // Visually reset stats to zero immediately
+
+        // --- RESET UI LOGIC ---
+        
+        // 1. Force Bars to Zero
+        el.progressBarMain.style.width = '0%';
+        el.progressBarInterval.style.width = '0%';
+
+        // 2. Reset Text Labels immediately based on Type
+        if (this.config.type === 'interval') {
+            // INTERVAL WORKOUT
+            el.progressLabelLeft.textContent = `Interval 1/${this.config.intervals.length}`;
+            
+            // Calculate the text for the FIRST interval immediately
+            const firstInt = this.config.intervals[0];
+            if (firstInt.type === 'time') {
+                el.progressLabelRight.textContent = Utils.formatTime(firstInt.val * 60 * 1000);
+            } else {
+                el.progressLabelRight.textContent = `${firstInt.val}m`;
+            }
+            
+        } else {
+            // SINGLE WORKOUT (Time / Distance)
+            el.progressLabelLeft.textContent = this.config.type === 'time' ? "Time Goal" : "Distance Goal";
+            
+            // Calculate full target text immediately
+            if (this.config.type === 'time') {
+                el.progressLabelRight.textContent = Utils.formatTime(this.config.value * 60 * 1000);
+            } else {
+                el.progressLabelRight.textContent = `${this.config.value}m`;
+            }
+        }
+
+        // 3. Reset Stats to Zero (from previous step)
         el.workoutTime.textContent = "00:00";
         el.distance.textContent = "0m";
         el.strokeCount.textContent = "0";
+        
+        // ----------------------
+
         Utils.log(`Workout Ready: ${config.type}`);
     },
 
