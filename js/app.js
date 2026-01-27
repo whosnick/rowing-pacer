@@ -465,16 +465,18 @@ BLE.setCallback((data) => {
         el.spm.textContent = '--';
         el.spmSource.textContent = data.workoutActive ? 'Waiting...' : 'Idle';
     }
-    
+
     if(data.pace) el.pace.textContent = data.pace;
 
-    // Only update Time/Dist/Strokes directly if we are NOT in an active workout.
-    // If we are active, WorkoutManager.update() (called below) handles the math.
-    if (WorkoutManager.status !== 'active') {
+    // We only want to show "Raw Machine Data" if:
+    // 1. We are NOT in an active workout
+    // 2. AND we are NOT waiting for a configured workout to start (config is null)
+    if (WorkoutManager.status !== 'active' && !WorkoutManager.config) {
         if(data.strokes) el.strokeCount.textContent = data.strokes;
         if(data.distance) el.distance.textContent = data.distance + 'm';
         el.workoutTime.textContent = Utils.formatTime(data.time);
     }
+    
     // ---------------------------
 
     // 2. Update Workout Logic
