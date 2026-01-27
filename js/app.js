@@ -62,17 +62,27 @@ const WorkoutManager = {
         this.currentIntervalIndex = 0;
         this.updateTargetDisplay();
         this.updateProgressUI(0, 0);
+        // Visually reset stats to zero immediately
+        el.workoutTime.textContent = "00:00";
+        el.distance.textContent = "0m";
+        el.strokeCount.textContent = "0";
         Utils.log(`Workout Ready: ${config.type}`);
     },
 
     start() {
         if (this.status === 'active') return;
         this.status = 'active';
-        this.startSnapshot = { ...BLE.getLastKnownData() };
-        Pacer.startPacer(); // Ensure pacer animation loop is running
+        
+        // --- MODIFY THIS SECTION ---
+        const lastData = BLE.getLastKnownData();
+        this.startSnapshot = { 
+            time: lastData.time, 
+            dist: lastData.distance,
+            strokes: lastData.strokes // Add strokes here
+        };
+        // ---------------------------
 
-        // If interval, we might need specific logic per segment,
-        // but for now, we just rely on the update loop.
+        Pacer.startPacer();
         Utils.log("Workout Started (Active)");
     },
 
@@ -118,6 +128,12 @@ const WorkoutManager = {
         // Calculate Deltas from start of workout/interval
         const elapsedS = (bleData.time - this.startSnapshot.time) / 1000;
         const elapsedM = bleData.distance - this.startSnapshot.dist;
+        const elapsedStrokes = bleData.strokes - (this.startSnapshot.strokes || 0);
+
+        // Update UI with Active Workout Stats ---
+        el.workoutTime.textContent = Utils.formatTime(elapsedS * 1000);
+        el.distance.textContent = Math.floor(Math.max(0, elapsedM)) + 'm';
+        el.strokeCount.textContent = Math.max(0, elapsedStrokes);
 
         // Logic based on Type
         if (this.config.type === 'time') {
@@ -406,7 +422,7 @@ el.debugBtn.addEventListener('click', () => el.debugEl.style.display = el.debugE
 // --- BLE LOOP ---
 
 BLE.setCallback((data) => {
-    // 1. Update Raw Stats
+    // 1. Update Raw Stats (SPM and Pace are always instant, so they are fine)
     if (data.spm !== null) {
         el.spm.textContent = (Math.round(data.spm * 2) / 2).toFixed(1);
         el.spmSource.textContent = data.spmSource === "filtered" ? "Filtered Data" : "Device Avg";
@@ -415,11 +431,17 @@ BLE.setCallback((data) => {
         el.spm.textContent = '--';
         el.spmSource.textContent = data.workoutActive ? 'Waiting...' : 'Idle';
     }
-
-    if(data.strokes) el.strokeCount.textContent = data.strokes;
-    if(data.distance) el.distance.textContent = data.distance + 'm';
+    
     if(data.pace) el.pace.textContent = data.pace;
-    el.workoutTime.textContent = Utils.formatTime(data.time);
+
+    // Only update Time/Dist/Strokes directly if we are NOT in an active workout.
+    // If we are active, WorkoutManager.update() (called below) handles the math.
+    if (WorkoutManager.status !== 'active') {
+        if(data.strokes) el.strokeCount.textContent = data.strokes;
+        if(data.distance) el.distance.textContent = data.distance + 'm';
+        el.workoutTime.textContent = Utils.formatTime(data.time);
+    }
+    // ---------------------------
 
     // 2. Update Workout Logic
     WorkoutManager.update(data);
