@@ -42,10 +42,24 @@ export const setTargetSPM = (spm) => {
     }
 };
 
-export const togglePacer = () => {
-    if(pacerRunning) stopPacer();
-    else startPacer();
-    return pacerRunning;
+export const startPacer = () => {
+    if (pacerRunning) return; // Prevent double start
+    pacerRunning = true;
+    // dom.btn.textContent ... REMOVE button text logic as button is gone
+    pacerStartTime = performance.now();
+    currentPhase = 'drive';
+
+    requestWakeLock();
+    ensureAudio();
+    beep(); 
+    animatePacer();
+};
+
+export const stopPacer = () => {
+    pacerRunning = false;
+    releaseWakeLock();
+    if(pacerAnimationFrame) cancelAnimationFrame(pacerAnimationFrame);
+    resetPacerUI();
 };
 
 function startPacer() {

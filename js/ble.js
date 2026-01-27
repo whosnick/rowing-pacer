@@ -28,8 +28,11 @@ let workoutActive = false;
 let workoutStart = null;
 let accumWorkoutMs = 0;
 let stopTimer;
+let lastDataPayload = { time: 0, distance: 0, strokes: 0, workoutActive: false };
 
 // --- EXPORTED FUNCTIONS ---
+
+export const getLastKnownData = () => lastDataPayload;
 
 export const getRawLog = () => rawDataLog;
 
@@ -223,16 +226,18 @@ function updateUI(strokes, dist, pace) {
     // Calculate elapsed time
     const elapsed = accumWorkoutMs + (workoutActive && workoutStart ? performance.now() - workoutStart : 0);
 
-    // Send data back to App
+    // Create payload
+    lastDataPayload = {
+        spm: currentSPM,
+        spmSource: spmSource,
+        strokes: strokes || 0,
+        distance: dist || 0,
+        pace: pace || "--:--",
+        time: elapsed,
+        workoutActive: workoutActive
+    };
+
     if (onDataCallback) {
-        onDataCallback({
-            spm: currentSPM,
-            spmSource: spmSource,
-            strokes: strokes || 0,
-            distance: dist || 0,
-            pace: pace || "--:--",
-            time: elapsed,
-            workoutActive: workoutActive
-        });
+        onDataCallback(lastDataPayload);
     }
 }
