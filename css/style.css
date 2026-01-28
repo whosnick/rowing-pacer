@@ -113,7 +113,7 @@ body{background:linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);c
 .footer-controls { margin-top: auto; }
 .icon-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); padding: 8px 12px; border-radius: 8px; color: var(--text); cursor: pointer; }
 .icon-btn.active { background: var(--accent); border-color: var(--accent); }
-.spm-source { font-size: 10px; margin-top: 5px; }
+.spm-source { font-size: 16px; margin-top: 5px; }
 .spm-source.filtered { color: var(--accent); }
 
 .debug { display: none; margin-top: 10px; background: rgba(0,0,0,0.5); padding: 10px; font-family: monospace; font-size: 10px; max-height: 100px; overflow: auto; }
