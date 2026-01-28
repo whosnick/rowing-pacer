@@ -33,6 +33,40 @@ export const beep = async () => {
     o.stop(now + 0.2);
 };
 
+export const beepInterval = async () => {
+    if (!audioEnabled) return;
+    const ctx = ensureAudio();
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    const now = ctx.currentTime;
+
+    // Helper to create one tone
+    const playTone = (freq, start, duration) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        
+        o.frequency.value = freq;
+        o.type = 'sine';
+        
+        // Envelope: Attack -> Decay
+        g.gain.setValueAtTime(0, start);
+        g.gain.linearRampToValueAtTime(0.4, start + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.001, start + duration);
+
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start(start);
+        o.stop(start + duration);
+    };
+
+    // Play two distinct tones (High -> Higher)
+    // 1. First beep at 1200Hz
+    playTone(1200, now, 0.15);
+    
+    // 2. Second beep at 1600Hz (after 150ms delay)
+    playTone(1600, now + 0.15, 0.25);
+};
+
 export const requestWakeLock = async () => {
     try {
         if ('wakeLock' in navigator) {

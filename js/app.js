@@ -270,7 +270,7 @@ handleIntervalLogic(totalElapsedS, totalElapsedM) {
             this.stop(true);
         } else {
             // Next Interval
-            Utils.beep();
+            Utils.beepInterval(); // Was: Utils.beep();
             this.intervalSnapshot = null; // Triggers reset on next update loop
             el.targetSPMVal.style.color = "inherit"; // Reset text color
             

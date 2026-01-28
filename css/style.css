@@ -89,8 +89,8 @@ body{background:linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);c
 .rower-dot.drive { background: var(--drive); }
 .rower-dot.recovery { background: var(--recovery); }
 
-.timing-stats { display: flex; justify-content: space-between; width: 100%; font-family: monospace; font-size: 16px; color: var(--muted); align-items: center;}
-.phase-name-mini { font-weight: 800; font-size: 12px; color: var(--text); }
+.timing-stats { display: flex; justify-content: space-between; width: 100%; font-family: monospace; font-size: 14px; color: var(--muted); align-items: center;}
+.phase-name-mini { font-weight: 800; font-size: 16px; color: var(--text); }
 
 /* Stats & Controls */
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
