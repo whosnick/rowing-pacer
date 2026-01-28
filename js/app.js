@@ -1,17 +1,20 @@
 import * as Utils from './utils.js';
 import * as Pacer from './pacer.js';
 import * as BLE from './ble.js';
+import { DB } from './db.js';
 
 // --- DOM ELEMENTS ---
 const el = {
     // Views
     setupView: document.getElementById('setupView'),
     workoutView: document.getElementById('workoutView'),
+    historyView: document.getElementById('historyView'),
 
     // Setup Inputs
     workoutType: document.getElementById('workoutType'),
     workoutSettings: document.getElementById('workoutSettings'),
     startWorkoutBtn: document.getElementById('startWorkoutBtn'),
+    historyBtn: document.getElementById('historyBtn'),
 
     // Workout Display
     progressLabelLeft: document.getElementById('progressLabelLeft'),
@@ -42,7 +45,17 @@ const el = {
     phaseName: document.getElementById('phaseName'),
     rowerDot: document.getElementById('rowerDot'),
     driveTime: document.getElementById('driveTime'),
-    recovTime: document.getElementById('recovTime')
+    recovTime: document.getElementById('recovTime'),
+
+    // History & Modal
+    historyList: document.getElementById('historyList'),
+    closeHistoryBtn: document.getElementById('closeHistoryBtn'),
+    clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+    detailsModal: document.getElementById('detailsModal'),
+    closeModalBtn: document.getElementById('closeModalBtn'),
+    modalTitle: document.getElementById('modalTitle'),
+    modalSummary: document.getElementById('modalSummary'),
+    modalTableBody: document.getElementById('modalTableBody')
 };
 
 // --- WORKOUT STATE MANAGEMENT ---
@@ -54,17 +67,22 @@ const WorkoutManager = {
     currentIntervalIndex: 0,
 
     // Snapshot of BLE data at start of workout/interval
-    startSnapshot: { time: 0, dist: 0 },
+    startSnapshot: { time: 0, dist: 0, strokes: 0 },
+    
+    // History Tracking
+    intervalSnapshot: null,
+    completedSegments: [],
 
     init(config) {
         this.config = config;
         this.status = 'idle';
         this.currentIntervalIndex = 0;
         this.intervalSnapshot = null; // Forget previous interval history
+        this.completedSegments = []; // Reset history
         this.updateTargetDisplay();
 
         // --- RESET UI LOGIC ---
-        
+
         // 1. Force Bars to Zero
         el.progressBarMain.style.width = '0%';
         el.progressBarInterval.style.width = '0%';
@@ -73,7 +91,7 @@ const WorkoutManager = {
         if (this.config.type === 'interval') {
             // INTERVAL WORKOUT
             el.progressLabelLeft.textContent = `Interval 1/${this.config.intervals.length}`;
-            
+
             // Calculate the text for the FIRST interval immediately
             const firstInt = this.config.intervals[0];
             if (firstInt.type === 'time') {
@@ -81,11 +99,11 @@ const WorkoutManager = {
             } else {
                 el.progressLabelRight.textContent = `${firstInt.val}m`;
             }
-            
+
         } else {
             // SINGLE WORKOUT (Time / Distance)
             el.progressLabelLeft.textContent = this.config.type === 'time' ? "Time Goal" : "Distance Goal";
-            
+
             // Calculate full target text immediately
             if (this.config.type === 'time') {
                 el.progressLabelRight.textContent = Utils.formatTime(this.config.value * 60 * 1000);
@@ -98,7 +116,7 @@ const WorkoutManager = {
         el.workoutTime.textContent = "00:00";
         el.distance.textContent = "0m";
         el.strokeCount.textContent = "0";
-        
+
         // ----------------------
 
         Utils.log(`Workout Ready: ${config.type}`);
@@ -107,21 +125,24 @@ const WorkoutManager = {
     start() {
         if (this.status === 'active') return;
         this.status = 'active';
-        
-        // --- MODIFY THIS SECTION ---
+
         const lastData = BLE.getLastKnownData();
-        this.startSnapshot = { 
-            time: lastData.time, 
+        this.startSnapshot = {
+            time: lastData.time,
             dist: lastData.distance,
-            strokes: lastData.strokes // Add strokes here
+            strokes: lastData.strokes
         };
-        // ---------------------------
 
         Pacer.startPacer();
         Utils.log("Workout Started (Active)");
     },
 
     stop(finished = false) {
+        // Save logic: Only save if the workout was successfully finished (goal reached)
+        if (finished && this.status === 'active') {
+            this.saveWorkoutResult();
+        }
+
         this.status = 'finished';
         Pacer.stopPacer();
 
@@ -133,6 +154,66 @@ const WorkoutManager = {
             setTimeout(() => Utils.beep(), 200);
             setTimeout(() => Utils.beep(), 400);
         }
+    },
+
+    saveWorkoutResult() {
+        const lastData = BLE.getLastKnownData();
+        let summary = {};
+        let segments = [];
+
+        if (this.config.type === 'interval') {
+            // Use the accumulated segments from handleIntervalLogic
+            segments = [...this.completedSegments];
+
+            // Aggregated Summary
+            const totalTime = segments.reduce((acc, cur) => acc + cur.time, 0);
+            const totalDist = segments.reduce((acc, cur) => acc + cur.dist, 0);
+            const totalStrokes = segments.reduce((acc, cur) => acc + cur.strokes, 0);
+            const avgSpm = totalTime > 0 ? (totalStrokes / (totalTime / 60000)) : 0;
+
+            summary = {
+                time: totalTime,
+                dist: totalDist,
+                strokes: totalStrokes,
+                avgSpm: avgSpm
+            };
+
+        } else {
+            // Single Workout
+            const totalTime = lastData.time - this.startSnapshot.time;
+            const totalDist = lastData.distance - this.startSnapshot.dist;
+            const totalStrokes = lastData.strokes - (this.startSnapshot.strokes || 0);
+            const avgSpm = totalTime > 0 ? (totalStrokes / (totalTime / 60000)) : 0;
+
+            summary = {
+                time: totalTime,
+                dist: totalDist,
+                strokes: totalStrokes,
+                avgSpm: avgSpm
+            };
+
+            // Single segment for the table
+            segments.push({
+                index: 1,
+                time: totalTime,
+                dist: totalDist,
+                strokes: totalStrokes,
+                spm: avgSpm
+            });
+        }
+
+        const record = {
+            type: this.config.type,
+            config: this.config,
+            summary: summary,
+            segments: segments
+        };
+
+        DB.saveWorkout(record).then(() => {
+            Utils.log("Workout Saved to History");
+        }).catch(err => {
+            Utils.log("Error saving workout: " + err);
+        });
     },
 
     reset() {
@@ -153,7 +234,7 @@ const WorkoutManager = {
 
         // Auto-Stop Logic (Idle timeout handled by BLE, but we reflect it here)
         if (this.status === 'active' && !bleData.workoutActive) {
-            // BLE says workout stopped (8s idle)
+            // BLE says workout stopped (8s idle) -> Manual Stop equivalent (false)
             this.stop(false);
             return;
         }
@@ -190,95 +271,109 @@ const WorkoutManager = {
         }
     },
 
-handleIntervalLogic(totalElapsedS, totalElapsedM) {
-    // 1. Initialize Snapshot for this specific interval if needed
-    if (!this.intervalSnapshot) {
-        this.intervalSnapshot = { ...BLE.getLastKnownData() };
-        // Set Pacer Target
+    handleIntervalLogic(totalElapsedS, totalElapsedM) {
+        // 1. Initialize Snapshot for this specific interval if needed
+        if (!this.intervalSnapshot) {
+            this.intervalSnapshot = { ...BLE.getLastKnownData() };
+            // Set Pacer Target
+            const currentInt = this.config.intervals[this.currentIntervalIndex];
+            Pacer.setTargetSPM(currentInt.spm);
+            this.updateTargetDisplay();
+        }
+
+        // 2. Calculate Segment Elapsed
+        const currentBle = BLE.getLastKnownData();
+        const segElapsedS = (currentBle.time - this.intervalSnapshot.time) / 1000;
+        const segElapsedM = currentBle.distance - this.intervalSnapshot.distance;
+
         const currentInt = this.config.intervals[this.currentIntervalIndex];
-        Pacer.setTargetSPM(currentInt.spm);
-        this.updateTargetDisplay();
-    }
+        let isDone = false;
+        let progressPct = 0;
+        let remainingTxt = "";
 
-    // 2. Calculate Segment Elapsed
-    const currentBle = BLE.getLastKnownData();
-    const segElapsedS = (currentBle.time - this.intervalSnapshot.time) / 1000;
-    const segElapsedM = currentBle.distance - this.intervalSnapshot.distance;
+        // 3. Anticipation Variables
+        let remainingMetric = 0;
+        let anticipationThreshold = 0;
 
-    const currentInt = this.config.intervals[this.currentIntervalIndex];
-    let isDone = false;
-    let progressPct = 0;
-    let remainingTxt = "";
+        // 4. Calculate Progress & Remaining
+        if (currentInt.type === 'time') {
+            const targetS = currentInt.val * 60;
+            remainingMetric = targetS - segElapsedS; // Seconds left
+            anticipationThreshold = 10; // Start transitioning 10 seconds before end
 
-    // 3. Anticipation Variables
-    let remainingMetric = 0; 
-    let anticipationThreshold = 0;
-
-    // 4. Calculate Progress & Remaining
-    if (currentInt.type === 'time') {
-        const targetS = currentInt.val * 60;
-        remainingMetric = targetS - segElapsedS; // Seconds left
-        anticipationThreshold = 10; // Start transitioning 10 seconds before end
-        
-        progressPct = segElapsedS / targetS;
-        remainingTxt = Utils.formatTime(Math.max(0, remainingMetric * 1000));
-        if (segElapsedS >= targetS) isDone = true;
-    } else {
-        const targetM = currentInt.val;
-        remainingMetric = targetM - segElapsedM; // Meters left
-        anticipationThreshold = 35; // Start transitioning 35 meters before end
-
-        progressPct = segElapsedM / targetM;
-        remainingTxt = Math.floor(Math.max(0, remainingMetric)) + "m";
-        if (segElapsedM >= targetM) isDone = true;
-    }
-
-    // 5. Apply Anticipation Logic (Update Pacer Early)
-    if (!isDone && remainingMetric <= anticipationThreshold) {
-        const nextIdx = this.currentIntervalIndex + 1;
-        if (nextIdx < this.config.intervals.length) {
-            const nextSPM = this.config.intervals[nextIdx].spm;
-            // Update Pacer early. The pacer.js smoothing logic will handle the curve.
-            Pacer.setTargetSPM(nextSPM);
-            
-            // Visual indication
-            el.targetSPMVal.style.color = "var(--accent)"; 
-            el.targetSPMVal.textContent = `${nextSPM} (Next)`;
-        }
-    } else if (!isDone) {
-        // Ensure we are on current target
-        Pacer.setTargetSPM(currentInt.spm);
-        el.targetSPMVal.style.color = "inherit";
-        el.targetSPMVal.textContent = currentInt.spm;
-    }
-
-    // 6. Update UI
-    el.progressLabelLeft.textContent = `Interval ${this.currentIntervalIndex + 1}/${this.config.intervals.length}`;
-    el.progressLabelRight.textContent = remainingTxt;
-    el.progressBarInterval.style.width = `${Math.min(100, progressPct * 100)}%`;
-  
-    // Calculate Total Progress for the Main Bar
-    // Formula: (IntervalsCompleted + CurrentIntervalProgress) / TotalIntervals
-    const totalProgress = ((this.currentIntervalIndex + Math.min(1, progressPct)) / this.config.intervals.length) * 100;
-    el.progressBarMain.style.width = `${totalProgress}%`;
-
-    // -----------------------------------
-
-    if (isDone) {
-        this.currentIntervalIndex++;
-        if (this.currentIntervalIndex >= this.config.intervals.length) {
-            this.stop(true);
+            progressPct = segElapsedS / targetS;
+            remainingTxt = Utils.formatTime(Math.max(0, remainingMetric * 1000));
+            if (segElapsedS >= targetS) isDone = true;
         } else {
-            // Next Interval
-            Utils.beepInterval(); // Was: Utils.beep();
-            this.intervalSnapshot = null; // Triggers reset on next update loop
-            el.targetSPMVal.style.color = "inherit"; // Reset text color
-            
-            // Force visual reset of interval bar immediately for better UX
-            el.progressBarInterval.style.width = '0%';
+            const targetM = currentInt.val;
+            remainingMetric = targetM - segElapsedM; // Meters left
+            anticipationThreshold = 35; // Start transitioning 35 meters before end
+
+            progressPct = segElapsedM / targetM;
+            remainingTxt = Math.floor(Math.max(0, remainingMetric)) + "m";
+            if (segElapsedM >= targetM) isDone = true;
         }
-    }
-},
+
+        // 5. Apply Anticipation Logic (Update Pacer Early)
+        if (!isDone && remainingMetric <= anticipationThreshold) {
+            const nextIdx = this.currentIntervalIndex + 1;
+            if (nextIdx < this.config.intervals.length) {
+                const nextSPM = this.config.intervals[nextIdx].spm;
+                // Update Pacer early. The pacer.js smoothing logic will handle the curve.
+                Pacer.setTargetSPM(nextSPM);
+
+                // Visual indication
+                el.targetSPMVal.style.color = "var(--accent)";
+                el.targetSPMVal.textContent = `${nextSPM} (Next)`;
+            }
+        } else if (!isDone) {
+            // Ensure we are on current target
+            Pacer.setTargetSPM(currentInt.spm);
+            el.targetSPMVal.style.color = "inherit";
+            el.targetSPMVal.textContent = currentInt.spm;
+        }
+
+        // 6. Update UI
+        el.progressLabelLeft.textContent = `Interval ${this.currentIntervalIndex + 1}/${this.config.intervals.length}`;
+        el.progressLabelRight.textContent = remainingTxt;
+        el.progressBarInterval.style.width = `${Math.min(100, progressPct * 100)}%`;
+
+        // Calculate Total Progress for the Main Bar
+        // Formula: (IntervalsCompleted + CurrentIntervalProgress) / TotalIntervals
+        const totalProgress = ((this.currentIntervalIndex + Math.min(1, progressPct)) / this.config.intervals.length) * 100;
+        el.progressBarMain.style.width = `${totalProgress}%`;
+
+        // -----------------------------------
+
+        if (isDone) {
+            // RECORD INTERVAL DATA
+            const segmentTime = (currentBle.time - this.intervalSnapshot.time); // ms
+            const segmentDist = currentBle.distance - this.intervalSnapshot.distance;
+            const segmentStrokes = currentBle.strokes - (this.intervalSnapshot.strokes || 0);
+            const segmentAvgSpm = segmentTime > 0 ? (segmentStrokes / (segmentTime / 60000)) : 0;
+
+            this.completedSegments.push({
+                index: this.currentIntervalIndex + 1,
+                time: segmentTime,
+                dist: segmentDist,
+                strokes: segmentStrokes,
+                spm: segmentAvgSpm
+            });
+
+            this.currentIntervalIndex++;
+            if (this.currentIntervalIndex >= this.config.intervals.length) {
+                this.stop(true);
+            } else {
+                // Next Interval
+                Utils.beepInterval();
+                this.intervalSnapshot = null; // Triggers reset on next update loop
+                el.targetSPMVal.style.color = "inherit"; // Reset text color
+
+                // Force visual reset of interval bar immediately for better UX
+                el.progressBarInterval.style.width = '0%';
+            }
+        }
+    },
 
     updateTargetDisplay() {
         let target = 20;
@@ -320,7 +415,7 @@ function generateSetupUI() {
     // Helper: Generate Options
     const rangeOpts = (min, max, step, suffix = '') => {
         let arr = [];
-        for(let i=min; i<=max; i+=step) arr.push({v:i, t: i+suffix});
+        for (let i = min; i <= max; i += step) arr.push({ v: i, t: i + suffix });
         return arr;
     };
 
@@ -340,11 +435,11 @@ function generateSetupUI() {
     }
     else if (type === 'interval') {
         // Count 2 to 10
-        const countHtml = `<div class="form-group"><label>Number of Intervals</label><select id="setupCount">${rangeOpts(2,10,1).map(o=>`<option value="${o.v}">${o.t}</option>`).join('')}</select></div>`;
+        const countHtml = `<div class="form-group"><label>Number of Intervals</label><select id="setupCount">${rangeOpts(2, 10, 1).map(o => `<option value="${o.v}">${o.t}</option>`).join('')}</select></div>`;
         container.innerHTML += countHtml;
 
         // Type
-        container.appendChild(createSelect("Interval Type", "setupIntType", [{v:'time', t:'Time (min)'}, {v:'dist', t:'Distance (m)'}]));
+        container.appendChild(createSelect("Interval Type", "setupIntType", [{ v: 'time', t: 'Time (min)' }, { v: 'dist', t: 'Distance (m)' }]));
 
         // Value Container
         const valContainer = document.createElement('div');
@@ -366,8 +461,8 @@ function generateSetupUI() {
             // Create rows with BOTH value and SPM per interval
             let html = '<label style="font-size:12px;color:rgba(255,255,255,0.6);text-transform:uppercase;margin-bottom:8px;display:block;">Configure Each Interval</label>';
             let valOpts = intType === 'time' ? rangeOpts(1, 10, 1, " min") : rangeOpts(100, 2000, 100, " m");
-            
-            for(let i=1; i<=count; i++) {
+
+            for (let i = 1; i <= count; i++) {
                 html += `
                 <div class="interval-row">
                     <span>Interval ${i}</span>
@@ -375,7 +470,7 @@ function generateSetupUI() {
                         ${valOpts.map(o => `<option value="${o.v}">${o.t}</option>`).join('')}
                     </select>
                     <select class="int-spm-select">
-                        ${rangeOpts(16,32,1).map(o => `<option value="${o.v}" ${o.v===20?'selected':''}>${o.t} SPM</option>`).join('')}
+                        ${rangeOpts(16, 32, 1).map(o => `<option value="${o.v}" ${o.v === 20 ? 'selected' : ''}>${o.t} SPM</option>`).join('')}
                     </select>
                 </div>`;
             }
@@ -393,11 +488,99 @@ function toggleView(viewName) {
     if (viewName === 'setup') {
         el.setupView.classList.remove('hidden');
         el.workoutView.classList.add('hidden');
+        el.historyView.classList.add('hidden');
     } else {
         el.setupView.classList.add('hidden');
         el.workoutView.classList.remove('hidden');
+        el.historyView.classList.add('hidden');
     }
 }
+
+// --- HISTORY FUNCTIONS ---
+
+async function renderHistory() {
+    el.historyList.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
+
+    try {
+        const workouts = await DB.getAllWorkouts();
+        el.historyList.innerHTML = '';
+
+        if (workouts.length === 0) {
+            el.historyList.innerHTML = '<div style="text-align:center; color:var(--muted); padding:20px;">No workouts completed yet.</div>';
+            return;
+        }
+
+        workouts.forEach(w => {
+            const date = new Date(w.timestamp);
+            const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            // Format Summary
+            const dur = Utils.formatTime(w.summary.time);
+            const dist = Math.floor(w.summary.dist) + 'm';
+            const spm = Math.round(w.summary.avgSpm);
+
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `
+                <div class="h-info" onclick="showWorkoutDetails(${w.id})">
+                    <span class="h-date">${dateStr}</span>
+                    <span class="h-type">${w.type} Workout</span>
+                    <span class="h-summary">${dur} / ${dist} / ${spm} spm</span>
+                </div>
+                <div class="h-actions">
+                    <button class="btn-trash" onclick="deleteWorkoutItem(event, ${w.id})">🗑️</button>
+                </div>
+            `;
+            // Note: inline onclicks require window scope below
+            div.dataset.id = w.id;
+            el.historyList.appendChild(div);
+        });
+    } catch (e) {
+        el.historyList.innerHTML = 'Error loading history';
+        console.error(e);
+    }
+}
+
+// Window scoped functions for History Interaction
+window.deleteWorkoutItem = async (e, id) => {
+    e.stopPropagation(); // Prevent opening details
+    if (confirm('Delete this workout?')) {
+        await DB.deleteWorkout(id);
+        renderHistory();
+    }
+};
+
+window.showWorkoutDetails = async (id) => {
+    const workouts = await DB.getAllWorkouts();
+    const w = workouts.find(x => x.id === id);
+    if (!w) return;
+
+    el.modalTitle.textContent = `${w.type.toUpperCase()} - ${new Date(w.timestamp).toLocaleDateString()}`;
+
+    // Summary
+    el.modalSummary.innerHTML = `
+        <div class="ms-item"><div class="ms-label">Time</div><div class="ms-val">${Utils.formatTime(w.summary.time)}</div></div>
+        <div class="ms-item"><div class="ms-label">Distance</div><div class="ms-val">${Math.floor(w.summary.dist)}m</div></div>
+        <div class="ms-item"><div class="ms-label">Avg SPM</div><div class="ms-val">${Math.round(w.summary.avgSpm)}</div></div>
+        <div class="ms-item"><div class="ms-label">Strokes</div><div class="ms-val">${w.summary.strokes}</div></div>
+    `;
+
+    // Table
+    let html = '';
+    w.segments.forEach(seg => {
+        html += `
+        <tr>
+            <td>${seg.index}</td>
+            <td>${Utils.formatTime(seg.time)}</td>
+            <td>${Math.floor(seg.dist)}m</td>
+            <td>${Math.round(seg.spm)}</td>
+        </tr>`;
+    });
+    el.modalTableBody.innerHTML = html;
+
+    el.detailsModal.classList.remove('hidden');
+};
+
 
 // --- INITIALIZATION ---
 
@@ -484,6 +667,30 @@ el.audioBtn.addEventListener('click', () => {
 el.logBtn.addEventListener('click', () => Utils.saveRawLog(BLE.getRawLog()));
 el.debugBtn.addEventListener('click', () => el.debugEl.style.display = el.debugEl.style.display === 'none' ? 'block' : 'none');
 
+// History Events
+el.historyBtn.addEventListener('click', () => {
+    el.historyView.classList.remove('hidden');
+    renderHistory();
+});
+
+el.closeHistoryBtn.addEventListener('click', () => {
+    el.historyView.classList.add('hidden');
+});
+
+el.clearHistoryBtn.addEventListener('click', async () => {
+    if (confirm("Are you sure you want to delete ALL workout history?")) {
+        await DB.clearAll();
+        renderHistory();
+    }
+});
+
+el.closeModalBtn.addEventListener('click', () => {
+    el.detailsModal.classList.add('hidden');
+});
+el.detailsModal.addEventListener('click', (e) => {
+    if (e.target === el.detailsModal) el.detailsModal.classList.add('hidden');
+});
+
 // --- BLE LOOP ---
 BLE.setCallback((data) => {
     // 1. Update Raw Stats
@@ -498,17 +705,17 @@ BLE.setCallback((data) => {
         el.spmSource.className = 'spm-source';
     }
 
-    if(data.pace) el.pace.textContent = data.pace;
+    if (data.pace) el.pace.textContent = data.pace;
 
     // We only want to show "Raw Machine Data" if:
     // 1. We are NOT in an active workout
     // 2. AND we are NOT waiting for a configured workout to start (config is null)
     if (WorkoutManager.status !== 'active' && !WorkoutManager.config) {
-        if(data.strokes) el.strokeCount.textContent = data.strokes;
-        if(data.distance) el.distance.textContent = data.distance + 'm';
+        if (data.strokes) el.strokeCount.textContent = data.strokes;
+        if (data.distance) el.distance.textContent = data.distance + 'm';
         el.workoutTime.textContent = Utils.formatTime(data.time);
     }
-    
+
     // ---------------------------
 
     // 2. Update Workout Logic

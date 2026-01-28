@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-    <title>Rowing Pacer v4.5</title>
+    <title>Rowing Pacer v5.0</title>
     <meta name="theme-color" content="#0f2027"/>
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -12,7 +12,7 @@
 <body>
 
     <div class="header">
-        <h1>Rowing Pacer v4.0</h1>
+        <h1>Rowing Pacer v5.0</h1>
         <button id="connectBtn">Connect BLE</button>
     </div>
 
@@ -35,7 +35,9 @@
             <div id="workoutSettings">
                 <!-- Injected via JS based on Type -->
             </div>
-
+            <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+                <button id="historyBtn" class="icon-btn" style="background:var(--card);">📅 History</button>
+            </div>
             <button id="startWorkoutBtn" class="action-btn">Ready to Row</button>
             <div class="setup-hint">Connect BLE first for auto-start</div>
         </div>
@@ -114,7 +116,44 @@
                 <button id="stopWorkoutBtn" class="stop-btn">End Workout</button>
             </div>
         </div>
+        <!-- ================= HISTORY VIEW ================= -->
+        <div id="historyView" class="hidden full-view">
+            <div class="header-simple">
+                <h2>Workout History</h2>
+                <button id="closeHistoryBtn" class="icon-btn">Back</button>
+            </div>
+            
+            <div class="history-controls">
+                <button id="clearHistoryBtn" class="stop-btn" style="font-size:12px; padding:10px;">Delete All History</button>
+            </div>
 
+            <div id="historyList" class="history-list">
+                <!-- JS Injected Items -->
+            </div>
+        </div>
+
+        <!-- ================= DETAILS MODAL ================= -->
+        <div id="detailsModal" class="modal hidden">
+            <div class="modal-content">
+                <h3 id="modalTitle">Workout Details</h3>
+                <div id="modalSummary" class="modal-summary"></div>
+                
+                <div class="table-container">
+                    <table id="modalTable">
+                        <thead>
+                            <tr>
+                                <th>Seg</th>
+                                <th>Time</th>
+                                <th>Dist</th>
+                                <th>SPM</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalTableBody"></tbody>
+                    </table>
+                </div>
+                <button id="closeModalBtn" class="action-btn">Close</button>
+            </div>
+        </div>
         <!-- System Controls (Bottom) -->
         <div class="controls footer-controls">
             <button id="audioBtn" class="icon-btn">🔊 Sound</button>

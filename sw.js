@@ -8,6 +8,7 @@ const ASSETS = [
   './js/ble.js',
   './js/pacer.js',
   './js/utils.js',
+  './js/db.js', // <--- ADD THIS
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
