@@ -35,6 +35,8 @@ export const getLastKnownData = () => lastDataPayload;
 
 export const getRawLog = () => rawDataLog;
 
+export const debugSetData = (data) => { lastDataPayload = data; };
+
 export const setCallback = (cb) => {
     onDataCallback = cb;
 };

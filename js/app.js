@@ -514,3 +514,6 @@ BLE.setCallback((data) => {
     // 2. Update Workout Logic
     WorkoutManager.update(data);
 });
+
+window.BLE = BLE;
+window.WorkoutManager = WorkoutManager;
