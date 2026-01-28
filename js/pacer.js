@@ -1,4 +1,4 @@
-import { beep, requestWakeLock, releaseWakeLock, ensureAudio } from './utils.js';
+import { beep, requestWakeLock, releaseWakeLock, ensureAudio, beepRecovery } from './utils.js';
 
 const strokeData = {
     16: { drive: 1.18, recovery: 2.57 },
@@ -162,6 +162,7 @@ function animatePacer(timestamp) {
             dom.phaseName.textContent = "RECOVERY";
             dom.phaseName.className = "phase-name recovery";
             dom.rowerDot.className = "rower-dot recovery";
+            beepRecovery(); 
         }
         const recoveryProgress = (cycleProgress - driveRatio) / (1 - driveRatio);
         dom.rowerDot.style.left = `calc((100% - 40px) - (${recoveryProgress} * (100% - 50px)))`;

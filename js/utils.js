@@ -33,6 +33,26 @@ export const beep = async () => {
     o.stop(now + 0.2);
 };
 
+export const beepRecovery = async () => {
+    if (!audioEnabled) return;
+    const ctx = ensureAudio();
+    if (ctx.state === 'suspended') await ctx.resume();
+    
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    
+    // High pitch short beep for Catch
+    o.frequency.value = 880; 
+    g.gain.setValueAtTime(0.3, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start(now);
+    o.stop(now + 0.2);
+};
+
 export const beepInterval = async () => {
     if (!audioEnabled) return;
     const ctx = ensureAudio();
