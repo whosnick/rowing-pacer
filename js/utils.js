@@ -43,7 +43,7 @@ export const beepRecovery = async () => {
     const g = ctx.createGain();
     
     // High pitch short beep for Catch
-    o.frequency.value = 880; 
+    o.frequency.value = 1000; 
     g.gain.setValueAtTime(0.3, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
     
