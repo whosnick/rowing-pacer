@@ -52,6 +52,7 @@ const el = {
     closeHistoryBtn: document.getElementById('closeHistoryBtn'),
     clearHistoryBtn: document.getElementById('clearHistoryBtn'),
     detailsModal: document.getElementById('detailsModal'),
+    redoWorkoutBtn: document.getElementById('redoWorkoutBtn'), // <--- NEW
     closeModalBtn: document.getElementById('closeModalBtn'),
     modalTitle: document.getElementById('modalTitle'),
     modalSummary: document.getElementById('modalSummary'),
@@ -489,14 +490,20 @@ function toggleView(viewName) {
         el.setupView.classList.remove('hidden');
         el.workoutView.classList.add('hidden');
         el.historyView.classList.add('hidden');
-    } else {
+    } else if (viewName === 'workout') {
         el.setupView.classList.add('hidden');
         el.workoutView.classList.remove('hidden');
         el.historyView.classList.add('hidden');
+    } else {
+        // Fallback
+        el.setupView.classList.remove('hidden');
     }
 }
 
 // --- HISTORY FUNCTIONS ---
+
+// Holds the config of the workout currently being viewed in the modal
+let currentModalConfig = null;
 
 async function renderHistory() {
     el.historyList.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
@@ -554,6 +561,9 @@ window.showWorkoutDetails = async (id) => {
     const workouts = await DB.getAllWorkouts();
     const w = workouts.find(x => x.id === id);
     if (!w) return;
+
+    // Store config for Redo functionality
+    currentModalConfig = w.config;
 
     el.modalTitle.textContent = `${w.type.toUpperCase()} - ${new Date(w.timestamp).toLocaleDateString()}`;
 
@@ -684,11 +694,37 @@ el.clearHistoryBtn.addEventListener('click', async () => {
     }
 });
 
+// Modal Events
 el.closeModalBtn.addEventListener('click', () => {
     el.detailsModal.classList.add('hidden');
+    currentModalConfig = null;
 });
 el.detailsModal.addEventListener('click', (e) => {
-    if (e.target === el.detailsModal) el.detailsModal.classList.add('hidden');
+    if (e.target === el.detailsModal) {
+        el.detailsModal.classList.add('hidden');
+        currentModalConfig = null;
+    }
+});
+
+// Redo Workout Event
+el.redoWorkoutBtn.addEventListener('click', () => {
+    if (!currentModalConfig) return;
+
+    // Close all history overlays
+    el.detailsModal.classList.add('hidden');
+    el.historyView.classList.add('hidden');
+
+    // Initialize workout with retrieved config
+    WorkoutManager.init(currentModalConfig);
+    toggleView('workout');
+
+    Utils.log("Redo Workout Loaded");
+
+    // Auto-start check
+    const lastData = BLE.getLastKnownData();
+    if (lastData && lastData.workoutActive) {
+        WorkoutManager.start();
+    }
 });
 
 // --- BLE LOOP ---

@@ -119,6 +119,29 @@ th { text-align: left; color: var(--muted); border-bottom: 1px solid rgba(255,25
 td { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 8px 4px; }
 tr:last-child td { border-bottom: none; }
 
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.modal-actions .action-btn {
+    flex: 1;
+    margin-top: 0; /* Reset previous margin */
+    padding: 12px;
+    font-size: 14px;
+}
+
+.action-btn.redo {
+    background: var(--accent);
+    color: white;
+}
+
+.action-btn.close {
+    background: rgba(255,255,255,0.1);
+    color: var(--muted);
+}
+
 /* Pacer Card */
 .pacer-container {
     background: var(--card); backdrop-filter: blur(10px);
