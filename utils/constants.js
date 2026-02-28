@@ -5,16 +5,6 @@
 export const FTMS_SERVICE_UUID = '00001826-0000-1000-8000-00805f9b34fb';
 export const ROWER_DATA_CHAR_UUID = '00002ad1-0000-1000-8000-00805f9b34fb';
 
-export const UNITS = {
-  pace: '/500m',
-  hr: 'bpm',
-  spm: 'spm',
-  watts: 'W',
-  distance: 'm',
-  calories: 'cal',
-  time: '',
-};
-
 // ─── HR Zone Configuration (Karvonen HRR) ────────────────────────────────────
 // NOTE: HR data comes from FTMS rower telemetry when available.
 // No separate HR monitor BLE connection is needed.
