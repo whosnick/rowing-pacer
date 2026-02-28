@@ -57,7 +57,7 @@ export default function renderHome(state) {
           </button>
         </div>
 
-        <!-- HR from PM5 chest strap (no separate connection needed) -->
+        <!-- HR from rower telemetry (no separate connection needed) -->
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <div style="
@@ -75,8 +75,8 @@ export default function renderHome(state) {
               <div style="font-weight: 600; color: white; font-size: 0.875rem;">Heart Rate</div>
               <div style="font-size: 0.75rem; color: var(--slate-400);">
                 ${state.hrConnected
-                  ? `${state.hrData?.hr ?? '--'} bpm · via PM5 strap`
-                  : 'Pair chest strap to PM5'}
+                  ? `${state.hrData?.hr ?? '--'} bpm · via rower sensor`
+                  : 'Pair chest strap with your rower'}
               </div>
             </div>
           </div>

@@ -1,12 +1,11 @@
-const CACHE_NAME = 'rowing-pacer-v5';
+const CACHE_NAME = 'rowing-pacer-v6';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/app.js',
   '/style.css',
   '/manifest.json',
-  '/PM5Simulator.js',
-  '/bluetooth/pm5Service.js',
+  '/bluetooth/ftmsService.js',
   '/components/BottomNav.js',
   '/components/EditorView.js',
   '/components/HistoryView.js',
@@ -16,12 +15,9 @@ const ASSETS_TO_CACHE = [
   '/components/WorkoutDetailView.js',
   '/components/WorkoutView.js',
   '/utils/CoachingEngine.js',
-  '/utils/c2Service.js',
   '/utils/constants.js',
-  '/utils/csafeBuilder.js',
   '/utils/formatters.js',
   '/utils/icons.js',
-  '/utils/spmPacer.js',
   '/utils/storage.js',
   '/utils/templateEngine.js',
   '/utils/tts.js',
