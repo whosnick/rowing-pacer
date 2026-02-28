@@ -378,7 +378,7 @@ export async function saveBleData(workoutId, strokeArray) {
     const record = {
       workoutId: workoutId,
       timestamp: Date.now(),
-      type: 'concept2_strokes', 
+      type: 'rower_strokes', 
       data: strokeArray         
     };
 

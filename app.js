@@ -8,17 +8,12 @@ import {
 } from './utils/constants.js';
 
 import {
-  connectPM5,
-  disconnectPM5,
-  resetPM5Session,
-  programWorkout,
-  requestDragFactor,
-  reconnect,
-  terminateWorkout
-} from './bluetooth/pm5Service.js';
-
-import { WORKOUT_STATE, ROWING_STATE } from './utils/csafeBuilder.js';
-import { on, off, BUS } from './utils/telemetryBus.js';
+  connectRower,
+  disconnectRower,
+  resetRowerSession,
+  reconnect
+} from './bluetooth/ftmsService.js';
+import { on, BUS } from './utils/telemetryBus.js';
 import { WorkoutFSM, WS, WE } from './utils/WorkoutFSM.js';
 import { initBuffer, pushStroke, finalizeBuffer } from './utils/telemetryBuffer.js';
 import { updateZoneTime, getZoneDistribution, resetZoneTracking } from './utils/zoneTracker.js';
@@ -48,7 +43,7 @@ const state = {
   view: 'home',
   workoutStatus: 'idle',
   bleConnected: false,
-  // NOTE: hrConnected is now derived from PM5 data (heartrate !== null)
+  // NOTE: hrConnected is now derived from rower data (heartrate !== null)
   // Kept for backwards compatibility with views that render based on it.
   hrConnected: false,
 
@@ -69,7 +64,7 @@ const state = {
   editingWorkout: null,
   programs: [], // Unified list (templates + custom)
 
-  // Rower data – now sourced from PM5 consolidated dataPayload
+  // Rower data – now sourced from rower consolidated dataPayload
   rowerData: {
     spm: null,
     strokes: 0,
@@ -78,9 +73,9 @@ const state = {
     watts: 0,
     cals: 0,
     duration: 0,
-    heartrate: null,      // from PM5's paired chest strap (null if not paired/invalid)
-    workoutState: 0,      // PM5 workout state enum
-    rowingState: 0,       // PM5 rowing state enum
+    heartrate: null,      // from rower's paired chest strap (null if not paired/invalid)
+    workoutState: 0,      // rower workout state enum
+    rowingState: 0,       // rower rowing state enum
     isActive: false,
     workoutActive: false,  // alias kept for backward compat
     driveLength: 0, // NEW
@@ -88,7 +83,7 @@ const state = {
     dragFactor: 0   // NEW
   },
 
-  // hrData is now populated from PM5 rower data (no separate HR monitor needed)
+  // hrData is now populated from rower rower data (no separate HR monitor needed)
   hrData: {
     hr: null,
     zone: null
@@ -265,23 +260,12 @@ function setupEventListeners() {
     state.intervalStartValue = 0;
     state.intervalCurrentProgress = 0;
     state.workoutStatus = 'idle';
-    state._lastPM5SplitNumber = -1;
-    fsm.reset(); // Returns FSM to IDLE so it accepts PM5_ROWING events again
+    state._lastSplitNumber = -1;
+    fsm.reset(); // Returns FSM to IDLE so it accepts ROWING events again
 
-    resetPM5Session();
+    resetRowerSession();
     resetRowerData();
     resetZoneTracking();
-
-    // Program the PM5 with the selected workout (if connected)
-    if (state.bleConnected) {
-      try {
-        await programWorkout(normalizedWorkout);
-        console.log('[App] PM5 workout programmed successfully');
-      } catch (err) {
-        console.warn('[App] Failed to program PM5 workout:', err);
-        // Non-fatal: user can still row manually
-      }
-    }
 
     navigateTo('workout');
   });
@@ -345,15 +329,15 @@ function setupEventListeners() {
     }
   });
 
-  window.addEventListener('connect:rower', handleConnectPM5);
-  window.addEventListener('disconnect:rower', handleDisconnectPM5);
+  window.addEventListener('connect:rower', handleConnectRower);
+  window.addEventListener('disconnect:rower', handleDisconnectRower);
 
-  // Legacy HR events are now no-ops since HR comes from the PM5
+  // Legacy HR events are now no-ops since HR comes from the rower
   window.addEventListener('connect:hr', () => {
-    console.log('[App] HR monitor connection requested — HR is now provided by the PM5 chest strap.');
+    console.log('[App] HR monitor connection requested — HR is now provided by the rower chest strap.');
   });
   window.addEventListener('disconnect:hr', () => {
-    console.log('[App] HR disconnect requested — pair/unpair chest strap directly with the PM5.');
+    console.log('[App] HR disconnect requested — pair/unpair chest strap directly with the rower.');
   });
 
   window.addEventListener('workout:showDetail', (e) => {
@@ -395,23 +379,6 @@ function setupFSM() {
     onEnter: async () => {
       stopWorkoutTimers();
       state.workoutStatus = 'finished';
-
-      // Wait up to 3 seconds for the PM5's official 0x0039 End of Workout Summary
-      // to populate state.endOfWorkoutAvgPaceSec and Drag Factor.
-      await new Promise(resolve => {
-        // If the summary already arrived during the tick, resolve immediately
-        if (state.endOfWorkoutAvgDragFactor) return resolve();
-        
-        // Otherwise, wait for it, but timeout after 3 seconds so the UI doesn't hang
-        const timeout = setTimeout(resolve, 3000);
-        
-        // Listen for the event specifically for this finish process
-        const unbind = on(BUS.END_OF_WORKOUT, () => {
-          clearTimeout(timeout);
-          unbind();
-          resolve();
-        });
-      });
 
       const summary = buildWorkoutSummary();
       await finalizeBuffer(summary);
@@ -477,30 +444,6 @@ function setupBusSubscriptions() {
     on(BUS.RECONNECT_REQUEST, async () => {
       await reconnect();
     }),
-    // PM5 fires this once when the workout ends (characteristic 0x0039).
-    // Use it as an additional PM5_END trigger in case workoutState transitions are missed.
-    on(BUS.END_OF_WORKOUT, (summaryData) => {
-      if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) {
-        fsm.send(WE.PM5_END);
-      }
-      // Save the official PM5 summary data to state
-      state.pm5FinalSummary = summaryData; 
-    }),
-    on(BUS.SPLIT_INTERVAL, (splitData) => {
-      if (state.workoutStatus === 'active') {
-        state.splits.push({
-          splitNumber: splitData.splitNumber,
-          time: splitData.splitTimeSec,
-          distance: splitData.splitDistM,
-          restTime: splitData.restTimeSec,
-          restDistance: splitData.restDistM,
-          totalElapsed: splitData.totalElapsedSec,
-          totalDistance: splitData.totalDistanceM,
-          timestamp: Date.now()
-        });
-        console.log('[App] Captured split:', splitData.splitNumber, splitData);
-      }
-    }),
   ];
 }
 
@@ -543,37 +486,7 @@ function handleBusTick(data) {
     state.hrData.zone = null;
   }
 
-  driveFSMFromPM5(data);
-
-  // If we have a variable interval workout and the PM5 reports a new split number,
-  // use it as an authoritative cross-check to advance currentIntervalIndex.
-  // The PM5 split number tracks grouped work+rest pairs, while app intervals include
-  // rest phases separately — so we advance to the next work phase when the PM5 advances.
-  if (
-    state.workoutStatus === 'active' &&
-    state.workout?.intervals?.length > 1 &&
-    typeof data.splitIntervalNumber === 'number'
-  ) {
-    const pm5Idx = data.splitIntervalNumber;
-    if (pm5Idx !== state._lastPM5SplitNumber) {
-      state._lastPM5SplitNumber = pm5Idx;
-      // Find the next work-phase app interval index whose PM5 group index matches
-      // (skip rest phases which share the same PM5 interval index as the preceding work phase)
-      let appIdx = 0;
-      let pm5Group = 0;
-      for (let i = 0; i < state.workout.intervals.length; i++) {
-        if (state.workout.intervals[i].phase !== 'rest') {
-          if (pm5Group === pm5Idx) { appIdx = i; break; }
-          pm5Group++;
-        }
-      }
-      if (appIdx > state.currentIntervalIndex) {
-        state.currentIntervalIndex = appIdx;
-        setupIntervalStart();
-        notifyIntervalChange();
-      }
-    }
-  }
+  driveFSMFromRower(data);
 
   if (state.workoutStatus === 'active' && state.workout) {
     checkIntervalCompletion();
@@ -584,59 +497,18 @@ function handleBusTick(data) {
   }
 }
 
-function driveFSMFromPM5(data) {
+function driveFSMFromRower(data) {
   if (!state.workout) return;
 
-  const ws = data.workoutState;
-  const rs = data.rowingState;
-  const rowing = rs === ROWING_STATE.ACTIVE;
-
-  const isWorkState = (
-    ws === WORKOUT_STATE.WORKOUTROW ||
-    ws === WORKOUT_STATE.INTERVALWORKTIME ||
-    ws === WORKOUT_STATE.INTERVALWORKDISTANCE ||
-    ws === WORKOUT_STATE.INTERVALRESTENDTOWORKTIME ||
-    ws === WORKOUT_STATE.INTERVALRESTENDTOWORKDISTANCE
-  );
-
-  const isRestState = (
-    ws === WORKOUT_STATE.INTERVALREST ||
-    ws === WORKOUT_STATE.INTERVALWORKTIMETOREST ||
-    ws === WORKOUT_STATE.INTERVALWORKDISTANCETOREST
-  );
-
-  // Trigger start for BOTH regular intervals and rest intervals
-  if (fsm.state === WS.IDLE) {
-    if ((isWorkState || isRestState) && rowing) {
-      handleWorkoutStart();
-    }
+  if (fsm.state === WS.IDLE && data.isActive) {
+    handleWorkoutStart();
+    return;
   }
 
-  const currentInterval = state.workout.intervals[state.currentIntervalIndex];
-  const isAppResting = currentInterval && currentInterval.phase === 'rest';
-
-  if (isWorkState) {
-    if (!rowing && fsm.state === WS.ACTIVE) {
-      fsm.send(WE.PM5_PAUSE);
-    } else if (rowing && fsm.state === WS.PAUSED) {
-      fsm.send(WE.PM5_RESUME);
-    }
-  } else if (isRestState) {
-    if (!isAppResting && fsm.state === WS.ACTIVE) {
-      fsm.send(WE.PM5_PAUSE);
-    } else if (isAppResting && fsm.state === WS.PAUSED) {
-      fsm.send(WE.PM5_RESUME);
-    }
-  }
-
-  if (
-    ws === WORKOUT_STATE.WORKOUTEND ||
-    ws === WORKOUT_STATE.TERMINATE ||
-    ws === WORKOUT_STATE.WORKOUTLOGGED
-  ) {
-    if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) {
-      fsm.send(WE.PM5_END);
-    }
+  if (fsm.state === WS.ACTIVE && !data.isActive) {
+    fsm.send(WE.PAUSE);
+  } else if (fsm.state === WS.PAUSED && data.isActive) {
+    fsm.send(WE.RESUME);
   }
 }
 
@@ -803,12 +675,10 @@ function checkIntervalCompletion() {
     }
 }
 
-let dragFactorTimer = null;
-
 function handleWorkoutStart() {
   console.log('[App] Starting new workout...');
   resetZoneTracking();
-  // removed: resetPM5Session();  <-- Was destroying data arriving in the same tick!
+  // removed: resetRowerSession();  <-- Was destroying data arriving in the same tick!
   // removed: resetRowerData();   <-- Was destroying data arriving in the same tick!
   setupIntervalStart();
 
@@ -817,13 +687,6 @@ function handleWorkoutStart() {
   state.splits =[];
 
   acquireWakeLock(); // Call asynchronously without await to avoid freezing the tick
-
-  if (dragFactorTimer) clearInterval(dragFactorTimer);
-  dragFactorTimer = setInterval(() => {
-    if (state.bleConnected) requestDragFactor();
-  }, 5000);
-
-  if (state.bleConnected) requestDragFactor();
 
   fsm.send(WE.START);
 }
@@ -838,13 +701,6 @@ async function handleWorkoutStop() {
 
 function handleWorkoutCancel() {
   stopWorkoutTimers();
-  if (dragFactorTimer) { clearInterval(dragFactorTimer); dragFactorTimer = null; }
-  
-  // Abort the workout on the PM5 machine
-  if (state.bleConnected) {
-    terminateWorkout().catch(err => console.warn('PM5 terminate failed:', err));
-  }
-
   state.workoutStatus = 'idle';
   state.workout = null;
   state.currentIntervalIndex = 0;
@@ -889,8 +745,6 @@ async function saveWorkoutToHistory() {
     ? state.rowerData.strokes / (state.workoutTime / 60) 
     : 0;
 
-  // 2. Get Official Data (from 0x0039 packet if received)
-  const summary = state.pm5FinalSummary || {}; 
   const restDistance = state.peakRestDistanceM || 0;
 
   const workout = {
@@ -898,23 +752,20 @@ async function saveWorkoutToHistory() {
     date: new Date().toISOString(),
     name: state.workout?.name || 'Custom Workout',
     
-    // PRIORITIZE OFFICIAL PM5 DATA
-    // If 0x0039 arrived, summary.timeSec is exact. If not, use state.workoutTime.
-    duration: summary.timeSec || state.workoutTime,
-    distance: summary.distM || fallbackWorkDistance,
+    duration: state.workoutTime,
+    distance: fallbackWorkDistance,
     
     restDistanceM: restDistance,
     // Note: totalDistanceM is work + rest. 
     // If summary.distM exists, use it. Otherwise use fallback.
-    totalDistanceM: (summary.distM || fallbackWorkDistance) + restDistance,
+    totalDistanceM: fallbackWorkDistance + restDistance,
 
-    avgSPM: summary.avgSPM || fallbackAvgSPM,
-    avgPace: summary.avgPaceSec || fallbackAvgPace,
+    avgSPM: fallbackAvgSPM,
+    avgPace: fallbackAvgPace,
     
-    // Heart Rate & Drag Factor
-    avgHR: summary.avgHR || state.hrData?.hr || null,
-    peakHR: summary.maxHR || state.peakHR || null,
-    dragFactor: summary.avgDragFactor || state.rowerData.dragFactor || null,
+    avgHR: state.hrData?.hr || null,
+    peakHR: state.peakHR || null,
+    dragFactor: state.rowerData.dragFactor || null,
 
     strokes: state.rowerData.strokes,
     calories: state.rowerData.cals,
@@ -949,31 +800,29 @@ async function saveWorkoutToHistory() {
   }
 }
 
-// ─── PM5 Connection ──────────────────────────────────────────────────────────
+// ─── rower Connection ──────────────────────────────────────────────────────────
 
-async function handleConnectPM5() {
+async function handleConnectRower() {
   try {
-    await connectPM5();
+    await connectRower();
     state.bleConnected = true;
-
-    if (state.workout) {
-      try {
-        await programWorkout(state.workout);
-        console.log('[App] PM5 workout programmed after connection');
-      } catch (err) {
-        console.warn('[App] Could not auto-program workout after connect:', err);
-      }
-    }
-
     render();
   } catch (error) {
-    console.error('[PM5 Connect Error]', error);
-    alert(`Failed to connect to PM5.\n\nReason: ${error.message || error}\n\nTips:\n• Use Chrome on Android or Windows/Mac desktop\n• iOS/Safari/Firefox do not support Web Bluetooth\n• Make sure the PM5 shows the BLE screen (Menu > Connect)\n• The page must be served over HTTPS`);
+    console.error('[Rower Connect Error]', error);
+    alert(`Failed to connect to the rowing machine.
+
+Reason: ${error.message || error}
+
+Tips:
+• Use Chrome on Android or desktop
+• iOS/Safari/Firefox do not support Web Bluetooth
+• Keep the rower powered on and nearby
+• The page must be served over HTTPS`);
   }
 }
 
-function handleDisconnectPM5() {
-  disconnectPM5();
+function handleDisconnectRower() {
+  disconnectRower();
   state.bleConnected = false;
   state.hrConnected = false;
   render();

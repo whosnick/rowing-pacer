@@ -4,7 +4,7 @@ import { formatTime, formatPace, formatDistance, formatHR, formatSPM } from '../
 import { HR_ZONES, UNITS } from '../utils/constants.js';
 import { getWorkout, getBleDataForWorkout } from '../utils/storage.js';
 import { icon } from '../utils/icons.js';
-import { uploadToConcept2, buildIntervalBoundaries } from '../utils/c2Service.js';
+import { buildIntervalBoundaries } from '../utils/intervals.js';
 
 // Canvas and graph state
 let canvas = null;
@@ -61,7 +61,7 @@ async function loadWorkoutData(workoutId, container, state) {
     let rawStrokes = null;
     
     const rawBleData = await getBleDataForWorkout(workoutId);
-    const strokeRecord = rawBleData.find(r => r.type === 'concept2_strokes');
+    const strokeRecord = rawBleData.find(r => r.type === 'rower_strokes');
 
     if (strokeRecord && strokeRecord.data) {
       console.log('[WorkoutDetail] Found high-res per-stroke data:', strokeRecord.data.length, 'strokes');
@@ -269,11 +269,6 @@ function renderContent(workout, state, rawStrokes) {
       
       <!-- Upload Button -->
       ${rawStrokes && rawStrokes.length > 0 ? `
-        <button id="c2SyncBtn" class="btn-primary" style="
-          display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; padding: 0.5rem 1rem; margin-top: 0.5rem;
-        ">
-          ${icon('activity', 'icon-sm')} To Logbook
-        </button>
       ` : ''}
     </div>
 
@@ -479,25 +474,6 @@ function setupEventHandlers(container, workout, state, rawStrokes) {
       window.dispatchEvent(new CustomEvent(`nav:${previous}`));
     };
   }
-
-  // Concept2 Upload Handler
-  const c2SyncBtn = container.querySelector('#c2SyncBtn');
-  if (c2SyncBtn && rawStrokes) {
-    c2SyncBtn.onclick = async () => {
-      try {
-        c2SyncBtn.disabled = true;
-        c2SyncBtn.innerHTML = '<div class="loading" style="width: 1rem; height: 1rem; min-height: auto;"></div> Uploading...';
-        
-        await uploadToConcept2(workout, rawStrokes);
-        
-        c2SyncBtn.innerHTML = '&#10003; Uploaded'; 
-        c2SyncBtn.classList.replace('btn-primary', 'btn-secondary');
-      } catch (err) {
-        console.error("C2 Upload Error:", err);
-        alert('Upload failed: ' + err.message);
-        c2SyncBtn.disabled = false;
-        c2SyncBtn.innerHTML = `${icon('activity', 'icon-sm')} To Logbook`;
-      }
     };
   }
 
