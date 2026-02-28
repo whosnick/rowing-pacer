@@ -1,39 +1,12 @@
 // utils/constants.js - Core configuration and workout templates
-// UPDATED for Concept2 PM5 CSAFE BLE protocol
+// FTMS-compatible constants for Merach rowers
 
-// ─── Concept2 PM5 BLE CSAFE UUIDs ────────────────────────────────────────────
-// Base UUID: ce06XXXX-43e5-11e4-916c-0800200c9a66
-const C2_SUFFIX = '-43e5-11e4-916c-0800200c9a66';
-
-export const UNITS = {
-  pace: '/500m',
-  hr: 'bpm',
-  spm: 'spm',
-  watts: 'W',
-  distance: 'm',
-  calories: 'cal',
-  time: '',
-};
-
-// Rowing data service (notifications for real-time metrics)
-export const PM5_ROWING_SERVICE      = `ce060030${C2_SUFFIX}`;
-export const PM5_GENERAL_STATUS      = `ce060031${C2_SUFFIX}`;  // 19B: time, dist, workout/rowing/stroke state
-export const PM5_ADDITIONAL_STATUS1  = `ce060032${C2_SUFFIX}`;  // 19B: speed, SPM, HR, pace, avg power
-export const PM5_ADDITIONAL_STATUS2  = `ce060033${C2_SUFFIX}`;  // 20B: calories, split data
-export const PM5_SAMPLE_RATE         = `ce060034${C2_SUFFIX}`;  // 1B: 0=1s 1=500ms 2=250ms 3=100ms (WRITE)
-export const PM5_STROKE_DATA         = `ce060035${C2_SUFFIX}`;  // 20B: per-stroke force/timing
-export const PM5_ADDITIONAL_STROKE   = `ce060036${C2_SUFFIX}`;  // 15B: stroke power, calories, projected
-export const PM5_SPLIT_DATA          = `ce060037${C2_SUFFIX}`;  // 18B: split/interval data
-export const PM5_END_OF_WORKOUT      = `ce060039${C2_SUFFIX}`;  // 20B: workout summary
-export const PM5_MULTIPLEXED         = `ce060080${C2_SUFFIX}`;  // Multiplexed notifications
-
-// Control service (CSAFE command/response)
-export const PM5_CONTROL_SERVICE     = `ce060020${C2_SUFFIX}`;
-export const PM5_RECEIVE_CHAR        = `ce060021${C2_SUFFIX}`;  // WRITE: send CSAFE commands to PM5
-export const PM5_TRANSMIT_CHAR       = `ce060022${C2_SUFFIX}`;  // NOTIFY: receive CSAFE responses
+// ─── FTMS BLE UUIDs (Merach-compatible) ─────────────────────────────────────
+export const FTMS_SERVICE_UUID = '00001826-0000-1000-8000-00805f9b34fb';
+export const ROWER_DATA_CHAR_UUID = '00002ad1-0000-1000-8000-00805f9b34fb';
 
 // ─── HR Zone Configuration (Karvonen HRR) ────────────────────────────────────
-// NOTE: HR data now comes from the PM5 directly (its paired chest strap).
+// NOTE: HR data comes from FTMS rower telemetry when available.
 // No separate HR monitor BLE connection is needed.
 
 export const HR_ZONES = [
@@ -106,7 +79,7 @@ export const DEFAULT_USER_SETTINGS = {
 //   • steady    → mid-workout aerobic base (spm:22, zone:2)
 //   • push      → mid-workout zone 3 blocks (spm:24, zone:3)
 //   • power     → sprint intervals only (spm:26, zone:4), always followed by rest
-//   • rest      → immediately after power only (spm:18, zone:1, isPM5Work:false)
+//   • rest      → immediately after power only (spm:18, zone:1, isWorkInterval:false)
 //   • recovery  → end only (spm:20, zone:1)
 export const INTERVAL_PHASES = {
   warmup: {
@@ -115,7 +88,7 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-warmup',
     defaultSPM:      20,
     defaultZone:     1,
-    isPM5Work:       true,
+    isWorkInterval:       true,
   },
 
   steady: {
@@ -124,7 +97,7 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-steady',
     defaultSPM:      22,
     defaultZone:     2,
-    isPM5Work:       true,
+    isWorkInterval:       true,
   },
 
   push: {
@@ -133,7 +106,7 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-push',
     defaultSPM:      24,
     defaultZone:     3,
-    isPM5Work:       true,
+    isWorkInterval:       true,
   },
 
   power: {
@@ -142,7 +115,7 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-power',
     defaultSPM:      26,
     defaultZone:     4,
-    isPM5Work:       true,
+    isWorkInterval:       true,
   },
 
   recovery: {
@@ -151,7 +124,7 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-recovery',
     defaultSPM:      20,
     defaultZone:     1,
-    isPM5Work:       true,
+    isWorkInterval:       true,
   },
 
   rest: {
@@ -160,12 +133,12 @@ export const INTERVAL_PHASES = {
     colorVar:        '--phase-rest',
     defaultSPM:      18,
     defaultZone:     1,
-    isPM5Work:       false,
+    isWorkInterval:       false,
   },
 };
 
 // ─── Input Constraints for Editor ────────────────────────────────────────────
-// PM5 limits (from spec Table 19):
+// rower limits (from spec Table 19):
 //   Max time:      9:59:59.99 → effectively unlimited for our use
 //   Max distance:  200,000m
 //   Max intervals: 30
@@ -213,7 +186,7 @@ export function generateWorkoutDescription(workout) {
   return `${minutes} min • ${count} Segments • ${type}`;
 }
 
-// ─── Workout Templates (PM5-compatible) ───────────────────────────────────────
+// ─── Workout Templates (rower-compatible) ───────────────────────────────────────
 //
 // Schema: intervals[] where each interval is:
 //   { type: 'time'|'distance', val: seconds|metres, phase: string, spm: number, zone: number }
@@ -223,11 +196,11 @@ export function generateWorkoutDescription(workout) {
 //   • steady    → mid-workout aerobic base (spm:22, zone:2)
 //   • push      → mid-workout zone 3 blocks (spm:24, zone:3)
 //   • power     → sprint intervals only (spm:26, zone:4), always followed by rest
-//   • rest      → immediately after power only (spm:18, zone:1, isPM5Work:false)
+//   • rest      → immediately after power only (spm:18, zone:1, isWorkInterval:false)
 //   • recovery  → end only (spm:20, zone:1)
 //
 // No mid-workout recovery phases — active rest between work blocks is just
-// steady at zone 2, which keeps meters counting continuously on the PM5.
+// steady at zone 2, which keeps meters counting continuously on the rower.
 //
 export const WORKOUT_TEMPLATES = {
 
@@ -236,7 +209,7 @@ export const WORKOUT_TEMPLATES = {
     id:      'just-row',
     name:    'JustRow — Free Row',
     created: Date.now(),
-    pm5Type: 'justRow',
+    machineType: 'justRow',
     intervals: [],
   },
 
@@ -310,7 +283,7 @@ export const WORKOUT_TEMPLATES = {
   // ── Gentle Climb ───────────────────────────────────────────────────────────
   // ~30 min | Distance pyramid | Zone 2 base, zone 3 at the peak.
   // 200 / 400 / 600 / 400 / 200m — 1800m total work distance.
-  // No mid-workout rest: all intervals are work (isPM5Work:true), so every
+  // No mid-workout rest: all intervals are work (isWorkInterval:true), so every
   // meter counts continuously. The ascending distances teach even pacing —
   // the instinct is always to go out too hard. The 600m peak briefly enters
   // zone 3. If HR hits zone 4 on the 600m piece, drop SPM to 22.
@@ -385,8 +358,8 @@ export const WORKOUT_TEMPLATES = {
 
   // ── Six Shooter ────────────────────────────────────────────────────────────
   // 20 min | 6 × 1min power / 1min rest | Sprint example.
-  // The only template using 'rest' (isPM5Work:false). Rest follows power
-  // exclusively — this is the design rule. During each 1-minute rest the PM5
+  // The only template using 'rest' (isWorkInterval:false). Rest follows power
+  // exclusively — this is the design rule. During each 1-minute rest the rower
   // enters its rest period and broadcasts restDistanceM in real time over BLE
   // (Additional Status 1, bytes 11-12). The app should display this as a live
   // "rest meters" counter so no effort feels invisible.
@@ -423,7 +396,7 @@ export const WORKOUT_TEMPLATES = {
   },
   debug: {
     id:      'debug',
-    name:    'Quick for debug using PM5 simulator',
+    name:    'Quick for debug using rower simulator',
     created: Date.now(),
     intervals: [
       { type: 'time', val: 30, phase: 'warmup',   spm: 20, zone: 1 },

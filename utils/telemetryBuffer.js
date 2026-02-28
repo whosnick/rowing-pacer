@@ -17,9 +17,9 @@ export function initBuffer(workoutId, templateId = null) {
 }
 
 /**
- * Captures a single completed stroke and formats it for Concept2 Logbook compatibility.
- * This should be called whenever the PM5 emits a Stroke Data event (0x0035).
- * @param {Object} data - The data payload from pm5Service onStrokeData
+ * Captures a single completed stroke and formats it for workout analysis compatibility.
+ * This should be called whenever the rower telemetry emits a completed stroke.
+ * @param {Object} data - The data payload from the FTMS telemetry service
  */
 export function pushStroke(data) {
   if (!currentWorkoutId) return;
@@ -28,7 +28,7 @@ export function pushStroke(data) {
   const watts = pace > 0 ? Math.round(2.8 / Math.pow(pace / 500, 3)) : 0;
 
   const stroke = {
-    // --- EXACT Concept2 Logbook API properties ---
+    // --- Normalized stroke properties ---
     t: Math.round((data.elapsedTimeSec || 0) * 10), // Time in tenths of a second
     d: Math.round((data.distanceMeters || 0) * 10), // Distance in decimeters
     p: Math.round(pace * 10),                       // Pace in tenths of a second

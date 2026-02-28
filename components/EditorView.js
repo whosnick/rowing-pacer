@@ -191,7 +191,7 @@ function renderIntervalRow(interval, index) {
         </div>
         <!-- Target Type Selection -->
         <div class="form-group" style="grid-column: span 2; margin-top: 0.5rem; border-top: 1px solid var(--slate-700); padding-top: 0.5rem;">
-          <label style="display: block; font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">PM5 Target</label>
+          <label style="display: block; font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Rower Target</label>
           <div style="display: flex; gap: 0.5rem;">
             <select class="input-target-type" data-index="${index}" style="flex: 1; background: var(--slate-900); color: white; border: 1px solid var(--slate-700); padding: 0.5rem; border-radius: 4px;">
               <option value="none" ${!interval.targetPace && !interval.targetWatts ? 'selected' : ''}>None</option>
