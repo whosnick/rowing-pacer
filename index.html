@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <title>Rowing Pacer - HR Zone Training</title>
+
+  <link rel="manifest" href="manifest.json">
+
+  <link rel="stylesheet" href="style.css">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Rowing Pacer">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <style>
+    #install-banner {
+      display: none;
+      position: fixed;
+      bottom: 80px;
+      left: 16px;
+      right: 16px;
+      background: linear-gradient(135deg, #1e40af, #3b82f6);
+      color: white;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 1000;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #install-banner.show { display: flex; }
+    #install-banner .text { flex: 1; }
+    #install-banner h3 { margin: 0 0 4px 0; font-size: 16px; }
+    #install-banner p { margin: 0; font-size: 13px; opacity: 0.9; }
+    #install-banner button {
+      background: white;
+      color: #1e40af;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-left: 12px;
+    }
+    #install-banner .dismiss {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      color: white;
+      opacity: 0.7;
+      font-size: 20px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="install-banner">
+    <button class="dismiss" onclick="this.parentElement.classList.remove('show')">&times;</button>
+    <div class="text">
+      <h3>Install Rowing Pacer</h3>
+      <p>Add to home screen for offline access</p>
+    </div>
+    <button id="install-btn">Install</button>
+  </div>
+
+  <script type="module" src="app.js"></script>
+  <script>
+    let deferredPrompt;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById('install-banner').classList.add('show');
+      console.log('[PWA] Install prompt available');
+    });
+
+    document.getElementById('install-btn').addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('[PWA] Install outcome:', outcome);
+        deferredPrompt = null;
+        document.getElementById('install-banner').classList.remove('show');
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      console.log('[PWA] App installed');
+      document.getElementById('install-banner').classList.remove('show');
+    });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then((registration) => {
+            console.log('SW registered:', registration.scope);
+          })
+          .catch((error) => {
+            console.log('SW registration failed:', error);
+          });
+      });
+    }
+  </script>
+</body>
+</html>
