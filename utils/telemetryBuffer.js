@@ -28,16 +28,11 @@ export function pushStroke(data) {
   const watts = pace > 0 ? Math.round(2.8 / Math.pow(pace / 500, 3)) : 0;
 
   const stroke = {
-    // --- Normalized stroke properties ---
-    t: Math.round((data.elapsedTimeSec || 0) * 10), // Time in tenths of a second
-    d: Math.round((data.distanceMeters || 0) * 10), // Distance in decimeters
-    p: Math.round(pace * 10),                       // Pace in tenths of a second
-    spm: Math.round(data.spm || 0),                 // Strokes per minute
+    t: Math.round((data.elapsedTimeSec || 0) * 10),
+    d: Math.round((data.distanceMeters || 0) * 10),
+    p: Math.round(pace * 10),
+    spm: Math.round(data.spm || 0),
     hr: (data.heartrate && data.heartrate < 255) ? data.heartrate : null,
-
-    // --- Extended metrics for local PWA features ---
-    drive_time: Math.round((data.driveTime || 0) * 1000),
-    recovery_time: Math.round((data.recoveryTime || 0) * 1000),
     watts: watts,
     elapsed_time: Math.round((data.elapsedTimeSec || 0) * 10) 
   };

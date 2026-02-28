@@ -57,7 +57,7 @@ export default function renderHome(state) {
           </button>
         </div>
 
-        <!-- HR from rower telemetry (no separate connection needed) -->
+        <!-- HR Monitor Connection -->
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <div style="
@@ -72,17 +72,21 @@ export default function renderHome(state) {
               ${state.hrConnected ? icon('heart', 'icon') : icon('heart', 'icon')}
             </div>
             <div>
-              <div style="font-weight: 600; color: white; font-size: 0.875rem;">Heart Rate</div>
+              <div style="font-weight: 600; color: white; font-size: 0.875rem;">Heart Rate Belt</div>
               <div style="font-size: 0.75rem; color: var(--slate-400);">
                 ${state.hrConnected
-                  ? `${state.hrData?.hr ?? '--'} bpm · via rower sensor`
-                  : 'Pair chest strap with your rower'}
+                  ? `${state.hrData?.hr ?? '--'} bpm`
+                  : 'Connect chest strap'}
               </div>
             </div>
           </div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem;">
-            ${state.hrConnected ? '✓ Live' : 'No data'}
-          </span>
+          <button id="toggleHR" class="btn-${state.hrConnected ? 'secondary' : 'primary'}" style="
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            border-radius: 0.5rem;
+          ">
+            ${state.hrConnected ? 'Disconnect' : 'Connect'}
+          </button>
         </div>
       </div>
     </div>
@@ -140,6 +144,9 @@ export default function renderHome(state) {
     // Connections
     const toggleRower = container.querySelector('#toggleRower');
     if (toggleRower) toggleRower.onclick = () => window.dispatchEvent(new CustomEvent(state.bleConnected ? 'disconnect:rower' : 'connect:rower'));
+
+    const toggleHR = container.querySelector('#toggleHR');
+    if (toggleHR) toggleHR.onclick = () => window.dispatchEvent(new CustomEvent(state.hrConnected ? 'disconnect:hr' : 'connect:hr'));
 
     // Quick Actions
     const freeRowBtn = container.querySelector('#freeRowBtn');

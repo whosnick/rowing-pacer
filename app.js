@@ -11,8 +11,14 @@ import {
   connectRower,
   disconnectRower,
   resetRowerSession,
-  reconnect
+  reconnect,
+  sendMachineCommand
 } from './bluetooth/ftmsService.js';
+import {
+  connectHRMonitor,
+  disconnectHRMonitor,
+  isHRMonitorConnected
+} from './bluetooth/hrService.js';
 import { on, BUS } from './utils/telemetryBus.js';
 import { WorkoutFSM, WS, WE } from './utils/WorkoutFSM.js';
 import { initBuffer, pushStroke, finalizeBuffer } from './utils/telemetryBuffer.js';
@@ -43,8 +49,6 @@ const state = {
   view: 'home',
   workoutStatus: 'idle',
   bleConnected: false,
-  // NOTE: hrConnected is now derived from rower data (heartrate !== null)
-  // Kept for backwards compatibility with views that render based on it.
   hrConnected: false,
 
   // User settings
@@ -62,7 +66,7 @@ const state = {
 
   // Editor & Programs
   editingWorkout: null,
-  programs: [], // Unified list (templates + custom)
+  programs:[], // Unified list (templates + custom)
 
   // Rower data – now sourced from rower consolidated dataPayload
   rowerData: {
@@ -73,32 +77,11 @@ const state = {
     watts: 0,
     cals: 0,
     duration: 0,
-    heartrate: null,      // from rower's paired chest strap (null if not paired/invalid)
-    workoutState: 0,      // rower workout state enum
-    rowingState: 0,       // rower rowing state enum
+    heartrate: null,
+    workoutState: 0,
+    rowingState: 0,
     isActive: false,
-    workoutActive: false,  // alias kept for backward compat
-    driveLength: 0, // NEW
-    driveTime: 0,   // NEW
-    dragFactor: 0   // NEW
-  },
-
-  // Which metrics are actually provided by the currently connected rower.
-  supportedMetrics: {
-    spm: false,
-    strokeCount: false,
-    distanceMeters: false,
-    currentPaceSec: false,
-    avgPowerWatts: false,
-    totalCals: false,
-    elapsedTimeSec: false,
-    heartrate: false,
-    driveLength: false,
-    driveTime: false,
-    peakForce: false,
-    workPerStroke: false,
-    strokeDistM: false,
-    dragFactor: false,
+    workoutActive: false,
   },
 
   // Baseline values at workout start so displayed values are workout-relative.
@@ -120,13 +103,13 @@ const state = {
   peakRestDistanceM: 0,
 
   // Split/Interval data captured during workout
-  splits: [],
+  splits:[],
 
   // Current workout session ID
   currentWorkoutId: null,
 
   // History
-  history: [],
+  history:[],
 
   // Detail view state
   detailWorkoutId: null
@@ -136,7 +119,7 @@ let workoutTimer = null;
 let zoneTrackingTimer = null;
 let wakeLock = null;
 let fsm = null;
-let busUnsubs = [];
+let busUnsubs =[];
 let currentWorkoutId = null;
 
 async function init() {
@@ -217,7 +200,7 @@ async function loadHistory() {
     console.log(`[App] History loaded: ${state.history.length} workouts`);
   } catch (error) {
     console.error('[App] Failed to load history:', error);
-    state.history = [];
+    state.history =[];
   }
 }
 
@@ -238,7 +221,7 @@ async function loadPrograms() {
     console.log(`[App] Programs loaded: ${state.programs.length} programs`);
   } catch (error) {
     console.error('[App] Failed to load programs:', error);
-    state.programs = [];
+    state.programs =[];
   }
 }
 
@@ -358,17 +341,12 @@ function setupEventListeners() {
   window.addEventListener('connect:rower', handleConnectRower);
   window.addEventListener('disconnect:rower', handleDisconnectRower);
 
-  // Legacy HR events are now no-ops since HR comes from the rower
-  window.addEventListener('connect:hr', () => {
-    console.log('[App] HR monitor connection requested — HR is now provided by the rower chest strap.');
-  });
-  window.addEventListener('disconnect:hr', () => {
-    console.log('[App] HR disconnect requested — pair/unpair chest strap directly with the rower.');
-  });
+  window.addEventListener('connect:hr', handleConnectHR);
+  window.addEventListener('disconnect:hr', handleDisconnectHR);
 
   window.addEventListener('workout:showDetail', (e) => {
     state.detailWorkoutId = e.detail.workoutId;
-    state.detailPreviousView = state.view; 
+    state.detailPreviousView = state.view;
     navigateTo('workout-detail');
   });
 }
@@ -387,6 +365,8 @@ function setupFSM() {
       } else if (from === WS.PAUSED || from === WS.DISCONNECTED) {
         startWorkoutTimers();
       }
+      
+      sendMachineCommand('START'); // Tell the physical machine to wake up / resume
       state.workoutStatus = 'active';
       render();
     },
@@ -396,6 +376,7 @@ function setupFSM() {
   fsm.on(WS.PAUSED, {
     onEnter: () => {
       stopWorkoutTimers();
+      sendMachineCommand('PAUSE'); // Freeze the physical machine LCD
       state.workoutStatus = 'paused';
       render();
     }
@@ -404,6 +385,7 @@ function setupFSM() {
   fsm.on(WS.FINISHED, {
     onEnter: async () => {
       stopWorkoutTimers();
+      sendMachineCommand('STOP'); // Tell the physical machine the workout is done
       state.workoutStatus = 'finished';
 
       const summary = buildWorkoutSummary();
@@ -443,13 +425,13 @@ function setupFSM() {
 }
 
 function setupBusSubscriptions() {
-  busUnsubs = [
+  busUnsubs =[
     on(BUS.TICK, handleBusTick),
     on(BUS.STROKE, (data) => {
       if (fsm.state === WS.ACTIVE) {
         pushStroke(data);
       }
-    }),    
+    }),
     on(BUS.DISCONNECTED, () => {
       if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) {
         fsm.send(WE.BLE_DISCONNECT);
@@ -470,6 +452,42 @@ function setupBusSubscriptions() {
     on(BUS.RECONNECT_REQUEST, async () => {
       await reconnect();
     }),
+    on(BUS.HR_DATA, (data) => {
+      state.hrData.hr = data.heartrate;
+      state.hrConnected = true;
+      if (state.userSettings?.hrMax) {
+        state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
+      }
+      if (data.heartrate !== null && data.heartrate !== undefined) {
+        state.peakHR = Math.max(state.peakHR || 0, data.heartrate);
+      }
+      if (state.view === 'workout') {
+        updateWorkoutView(state);
+      } else {
+        render();
+      }
+    }),
+    on(BUS.HR_DISCONNECTED, () => {
+      state.hrConnected = false;
+      state.hrData.hr = null;
+      state.hrData.zone = null;
+      if (state.view === 'workout') {
+        updateWorkoutView(state);
+      } else {
+        render();
+      }
+    }),
+    // Sync physical monitor button presses to App
+    on(BUS.MACHINE_PAUSED, () => {
+      if (fsm && fsm.state === WS.ACTIVE) fsm.send(WE.PAUSE);
+    }),
+    on(BUS.MACHINE_STOPPED, () => {
+      if (fsm && (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED)) fsm.send(WE.USER_STOP);
+    }),
+    on(BUS.MACHINE_RESUMED, () => {
+      if (fsm && fsm.state === WS.PAUSED) fsm.send(WE.RESUME);
+      else if (fsm && fsm.state === WS.IDLE && state.workout) handleWorkoutStart();
+    })
   ];
 }
 
@@ -495,38 +513,20 @@ function handleBusTick(data) {
     watts: data.avgPowerWatts,
     cals: relativeCals,
     duration: relativeElapsed,
-    driveLength: data.driveLength,
-    driveTime: data.driveTime,
-    dragFactor: data.dragFactor,
     heartrate: data.heartrate,
     workoutState: data.workoutState,
     rowingState: data.rowingState,
     isActive: data.isActive,
     workoutActive: data.isActive,
-    ...data
   };
 
-  if (data.supportedMetrics) {
-    for (const [metric, supported] of Object.entries(data.supportedMetrics)) {
-      state.supportedMetrics[metric] = state.supportedMetrics[metric] || !!supported;
-    }
-  }
-
-  if (data.heartrate != null) state.supportedMetrics.heartrate = true;
-  if (data.driveLength != null) state.supportedMetrics.driveLength = true;
-  if (data.driveTime != null) state.supportedMetrics.driveTime = true;
-  if (data.peakForce != null) state.supportedMetrics.peakForce = true;
-  if (data.workPerStroke != null) state.supportedMetrics.workPerStroke = true;
-  if (data.strokeDistM != null) state.supportedMetrics.strokeDistM = true;
-  if (data.dragFactor != null) state.supportedMetrics.dragFactor = true;
-
-  if (data.heartrate !== null) {
+  if (!isHRMonitorConnected() && data.heartrate !== null) {
     state.hrData.hr = data.heartrate;
     state.hrConnected = true;
     if (state.userSettings?.hrMax) {
       state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
     }
-  } else {
+  } else if (!isHRMonitorConnected()) {
     state.hrData.hr = null;
     state.hrData.zone = null;
     state.hrConnected = false;
@@ -546,13 +546,19 @@ function handleBusTick(data) {
 function driveFSMFromRower(data) {
   if (!state.workout) return;
 
+  const currentInterval = state.workout.intervals[state.currentIntervalIndex];
+  const isRestingPhase = currentInterval?.phase === 'rest';
+
   if (fsm.state === WS.IDLE && data.isActive) {
     handleWorkoutStart();
     return;
   }
 
+  // Do not auto-pause the FSM if we are in an intentional Rest interval
   if (fsm.state === WS.ACTIVE && !data.isActive) {
-    fsm.send(WE.PAUSE);
+    if (!isRestingPhase) {
+       fsm.send(WE.PAUSE);
+    }
   } else if (fsm.state === WS.PAUSED && data.isActive) {
     fsm.send(WE.RESUME);
   }
@@ -676,6 +682,7 @@ export function render() {
 function setupIntervalStart() {
     const interval = state.workout?.intervals[state.currentIntervalIndex];
     if (!interval) return;
+    
     state.intervalTime = 0;
     if (interval.type === 'distance') {
         state.intervalStartValue = state.rowerData.distance || 0;
@@ -683,6 +690,14 @@ function setupIntervalStart() {
         state.intervalStartValue = 0;
     }
     state.intervalCurrentProgress = 0;
+
+    // If entering a rest interval, pause the physical monitor clock!
+    if (interval.phase === 'rest') {
+        sendMachineCommand('PAUSE');
+    } else if (fsm.state === WS.ACTIVE) {
+        // Ensure machine is running if returning to a work interval
+        sendMachineCommand('START');
+    }
 }
 
 function resetRowerData() {
@@ -737,8 +752,6 @@ function handleWorkoutStart() {
     totalCals: state.rowerData.cals || 0,
     elapsedTimeSec: state.rowerData.duration || 0,
   };
-  // removed: resetRowerSession();  <-- Was destroying data arriving in the same tick!
-  // removed: resetRowerData();   <-- Was destroying data arriving in the same tick!
   setupIntervalStart();
 
   state.peakHR = null;
@@ -751,7 +764,7 @@ function handleWorkoutStart() {
 }
 
 function handleWorkoutPause() {
-  fsm.send(WE.USER_STOP);
+  fsm.send(WE.PAUSE);
 }
 
 async function handleWorkoutStop() {
@@ -760,16 +773,18 @@ async function handleWorkoutStop() {
 
 function handleWorkoutCancel() {
   stopWorkoutTimers();
+  sendMachineCommand('STOP'); // Force physical monitor to stop on cancel
+
   state.workoutStatus = 'idle';
   state.workout = null;
   state.currentIntervalIndex = 0;
   state.workoutTime = 0;
   state.intervalTime = 0;
   state.currentWorkoutId = null;
-  
+
   state.splits = [];
-  state.workoutPaceHistory = [];
-  state.workoutHrHistory = [];
+  state.workoutPaceHistory =[];
+  state.workoutHrHistory =[];
   state.lastSavedState = null;
   resetZoneTracking();
 
@@ -797,11 +812,11 @@ async function saveWorkoutToHistory() {
 
   // 1. Define Fallbacks (App's internal tracking)
   const fallbackWorkDistance = state.rowerData.distance || 0;
-  const fallbackAvgPace = fallbackWorkDistance > 0 
-    ? (state.workoutTime / (fallbackWorkDistance / 500)) 
+  const fallbackAvgPace = fallbackWorkDistance > 0
+    ? (state.workoutTime / (fallbackWorkDistance / 500))
     : 0;
-  const fallbackAvgSPM = state.workoutTime > 0 
-    ? state.rowerData.strokes / (state.workoutTime / 60) 
+  const fallbackAvgSPM = state.workoutTime > 0
+    ? state.rowerData.strokes / (state.workoutTime / 60)
     : 0;
 
   const restDistance = state.peakRestDistanceM || 0;
@@ -810,32 +825,31 @@ async function saveWorkoutToHistory() {
     id: workoutId,
     date: new Date().toISOString(),
     name: state.workout?.name || 'Custom Workout',
-    
+
     duration: state.workoutTime,
     distance: fallbackWorkDistance,
-    
+
     restDistanceM: restDistance,
-    // Note: totalDistanceM is work + rest. 
+    // Note: totalDistanceM is work + rest.
     // If summary.distM exists, use it. Otherwise use fallback.
     totalDistanceM: fallbackWorkDistance + restDistance,
 
     avgSPM: fallbackAvgSPM,
     avgPace: fallbackAvgPace,
-    
+
     avgHR: state.hrData?.hr || null,
     peakHR: state.peakHR || null,
-    dragFactor: state.rowerData.dragFactor || null,
 
     strokes: state.rowerData.strokes,
     calories: state.rowerData.cals,
     zoneDistribution: zoneDistribution,
     intervalCount: state.workout?.intervals?.length || 0,
-    intervals: state.workout?.intervals || [],
-    splits: state.splits || [],
+    intervals: state.workout?.intervals ||[],
+    splits: state.splits ||[],
   };
 
   // Add interval boundaries for later analysis (unchanged)
-  const intervalBoundaries = [];
+  const intervalBoundaries =[];
   let currentTime = 0;
   for (let i = 0; i < state.workout.intervals.length; i++) {
     intervalBoundaries.push({
@@ -859,7 +873,7 @@ async function saveWorkoutToHistory() {
   }
 }
 
-// ─── rower Connection ──────────────────────────────────────────────────────────
+// ─── Rower Connection ──────────────────────────────────────────────────────────
 
 async function handleConnectRower() {
   try {
@@ -883,7 +897,35 @@ Tips:
 function handleDisconnectRower() {
   disconnectRower();
   state.bleConnected = false;
+  render();
+}
+
+// ─── HR Monitor Connection ─────────────────────────────────────────────────────
+
+async function handleConnectHR() {
+  try {
+    await connectHRMonitor();
+    state.hrConnected = true;
+    render();
+  } catch (error) {
+    console.error('[HR Connect Error]', error);
+    alert(`Failed to connect to heart rate monitor.
+
+Reason: ${error.message || error}
+
+Tips:
+• Make sure your chest strap is worn and powered on
+• Use Chrome on Android or desktop
+• iOS/Safari/Firefox do not support Web Bluetooth
+• Keep the HR monitor nearby`);
+  }
+}
+
+function handleDisconnectHR() {
+  disconnectHRMonitor();
   state.hrConnected = false;
+  state.hrData.hr = null;
+  state.hrData.zone = null;
   render();
 }
 

@@ -51,24 +51,16 @@ const activeTimers = new Set();
 let uiCache = {};
 let _lastMetrics = {};
 
-function isMetricSupported(state, key) {
-  return state.supportedMetrics?.[key] === true;
-}
-
 function getDashboardMetricsHTML(state) {
   const metrics = [
-    { key: 'distanceMeters', label: 'Dist', id: 'display-dist', value: `${Math.round(state.rowerData?.distance || 0)}m` },
-    { key: 'avgPowerWatts', label: 'Watts', id: 'display-watts', value: `${Math.round(state.rowerData?.watts || 0)}` },
-    { key: 'driveLength', label: 'Drive Len', id: 'display-drive-len', value: '--' },
-    { key: 'driveTime', label: 'Drive Time', id: 'display-drive-time', value: '--' },
-    { key: 'peakForce', label: 'Peak Force', id: 'display-peak-force', value: '--' },
-    { key: 'workPerStroke', label: 'Work/Stroke', id: 'display-work-stroke', value: '--' },
-    { key: 'strokeDistM', label: 'Stroke Dist', id: 'display-stroke-dist', value: '--' },
-    { key: 'dragFactor', label: 'Drag Factor', id: 'display-drag', value: '--' },
+    { key: 'distance', label: 'Dist', id: 'display-dist', value: `${Math.round(state.rowerData?.distance || 0)}m` },
+    { key: 'watts', label: 'Watts', id: 'display-watts', value: `${Math.round(state.rowerData?.watts || 0)}` },
+    { key: 'strokes', label: 'Strokes', id: 'display-strokes', value: `${state.rowerData?.strokes || 0}` },
+    { key: 'cals', label: 'Cals', id: 'display-cals', value: `${Math.round(state.rowerData?.cals || 0)}` },
+    { key: 'duration', label: 'Time', id: 'display-duration', value: formatTime(state.rowerData?.duration || 0) },
   ];
 
   return metrics
-    .filter(metric => isMetricSupported(state, metric.key))
     .map(metric => `<div class="metric-item"><div class="metric-label muted">${metric.label}</div><div id="${metric.id}" class="metric-value">${metric.value}</div></div>`)
     .join('');
 }
@@ -382,29 +374,24 @@ function cacheDOMElements(state) {
     displayPaceHero:  document.getElementById('display-pace-hero'),
     displayTargetPace:document.getElementById('display-target-pace'),
     pacerTargetSPM:   document.getElementById('pacerTargetSPM'),
-    displayDriveLen:  document.getElementById('display-drive-len'),
-    displayDriveTime: document.getElementById('display-drive-time'),
-    displayDrag:      document.getElementById('display-drag'),
     displayTargetHR:  document.getElementById('display-target-hr'),
-    displayPeakForce: document.getElementById('display-peak-force'),
-    displayWorkStroke:document.getElementById('display-work-stroke'),
-    displayStrokeDist:document.getElementById('display-stroke-dist'),
     workoutTimeEl:    document.getElementById('display-workout-time'),
     intervalText:     document.getElementById('display-interval-text'),
     intervalProgress: document.getElementById('progress-interval'),
     displayHR:        document.getElementById('display-hr'),
     displayZone:      document.getElementById('display-zone'),
     displayDist:      document.getElementById('display-dist'),
-    displayPace:      document.getElementById('display-pace'), // if still tracked
     displayStrokes:   document.getElementById('display-strokes'),
     displayWatts:     document.getElementById('display-watts'),
+    displayCals:      document.getElementById('display-cals'),
+    displayDuration:  document.getElementById('display-duration'),
     pacerSPM:         document.getElementById('pacerSPM'),
     guidanceEl:       document.getElementById('guidanceMessage'),
     statusText:       document.getElementById('status-text'),
     segments:         []
   };
 
-  const intervals = state.workout?.intervals ||[];
+  const intervals = state.workout?.intervals || [];
   for (let i = 0; i < intervals.length; i++) {
     const segment = document.getElementById(`segment-${i}`);
     if (segment) {
@@ -533,14 +520,11 @@ export function updateWorkoutView(state) {
   if (hr) updateHRHistory(hr);
 
   // 8. Update Dashboard Metrics
-  if (uiCache.displayDist && isMetricSupported(state, 'distanceMeters')) uiCache.displayDist.textContent = `${Math.round(state.rowerData?.distance || 0)}m`;
-  if (uiCache.displayWatts && isMetricSupported(state, 'avgPowerWatts')) uiCache.displayWatts.textContent = Math.round(state.rowerData?.watts || 0);
-  if (uiCache.displayDriveLen && isMetricSupported(state, 'driveLength')) uiCache.displayDriveLen.textContent = state.rowerData.driveLength ? state.rowerData.driveLength.toFixed(2) + 'm' : '--';
-  if (uiCache.displayDriveTime && isMetricSupported(state, 'driveTime')) uiCache.displayDriveTime.textContent = state.rowerData.driveTime ? state.rowerData.driveTime.toFixed(2) + 's' : '--';
-  if (uiCache.displayPeakForce && isMetricSupported(state, 'peakForce')) uiCache.displayPeakForce.textContent = state.rowerData.peakForce ? `${Math.round(state.rowerData.peakForce)} lbf` : '--';
-  if (uiCache.displayWorkStroke && isMetricSupported(state, 'workPerStroke')) uiCache.displayWorkStroke.textContent = state.rowerData.workPerStroke ? `${Math.round(state.rowerData.workPerStroke)} J` : '--';
-  if (uiCache.displayStrokeDist && isMetricSupported(state, 'strokeDistM')) uiCache.displayStrokeDist.textContent = state.rowerData.strokeDistM ? `${state.rowerData.strokeDistM.toFixed(2)}m` : '--';
-  if (uiCache.displayDrag && isMetricSupported(state, 'dragFactor')) uiCache.displayDrag.textContent = state.rowerData.dragFactor || '--';
+  if (uiCache.displayDist) uiCache.displayDist.textContent = `${Math.round(state.rowerData?.distance || 0)}m`;
+  if (uiCache.displayWatts) uiCache.displayWatts.textContent = Math.round(state.rowerData?.watts || 0);
+  if (uiCache.displayStrokes) uiCache.displayStrokes.textContent = state.rowerData?.strokes || 0;
+  if (uiCache.displayCals) uiCache.displayCals.textContent = Math.round(state.rowerData?.cals || 0);
+  if (uiCache.displayDuration) uiCache.displayDuration.textContent = formatTime(state.rowerData?.duration || 0);
 
   // 9. Update Pacer Actual Value
   if (uiCache.pacerSPM) {

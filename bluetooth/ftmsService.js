@@ -1,9 +1,19 @@
-import { FTMS_SERVICE_UUID, ROWER_DATA_CHAR_UUID } from '../utils/constants.js';
+// bluetooth/ftmsService.js
+
+import { 
+  FTMS_SERVICE_UUID, 
+  ROWER_DATA_CHAR_UUID,
+  FTMS_CONTROL_POINT_UUID,
+  FTMS_STATUS_UUID 
+} from '../utils/constants.js';
 import { emit, BUS } from '../utils/telemetryBus.js';
 
 let device = null;
 let server = null;
 let rowerChar = null;
+let controlChar = null;
+let statusChar = null;
+let hasControl = false;
 let lastStrokeCount = 0;
 
 const dataPayload = {
@@ -16,16 +26,6 @@ const dataPayload = {
   elapsedTimeSec: 0,
   heartrate: null,
   isActive: false,
-  supportedMetrics: {
-    spm: false,
-    strokeCount: false,
-    distanceMeters: false,
-    currentPaceSec: false,
-    avgPowerWatts: false,
-    totalCals: false,
-    elapsedTimeSec: false,
-    heartrate: false,
-  },
 };
 
 function parseRowerData(buffer) {
@@ -45,18 +45,7 @@ function parseRowerData(buffer) {
   const elapsedTimePresent = !!(flags & 0x0800);
 
   const out = { moreData };
-  const supportedMetrics = {
-    spm: !moreData,
-    strokeCount: !moreData,
-    distanceMeters: totalDistPresent,
-    currentPaceSec: instPacePresent,
-    avgPowerWatts: avgPowerPresent,
-    totalCals: expEnergyPresent,
-    elapsedTimeSec: elapsedTimePresent,
-    heartrate: hrPresent,
-  };
 
-  // Stroke rate + stroke count are only present when the "more data" flag is clear.
   if (!moreData && o + 3 <= dv.byteLength) {
     out.spm = dv.getUint8(o) * 0.5;
     o += 1;
@@ -98,9 +87,39 @@ function parseRowerData(buffer) {
     out.elapsedTimeSec = dv.getUint16(o, true);
   }
 
-  out.supportedMetrics = supportedMetrics;
-
   return out;
+}
+
+// --- NEW: Handle Responses from the Machine ---
+function handleControlResponse(event) {
+  const dv = new DataView(event.target.value.buffer);
+  if (dv.byteLength >= 3 && dv.getUint8(0) === 0x80) { // 0x80 = Response Code
+    const reqOp = dv.getUint8(1);
+    const result = dv.getUint8(2);
+    
+    // If the machine says Success (0x01) to Request Control (0x00)
+    if (reqOp === 0x00 && result === 0x01) {
+      hasControl = true;
+      console.log('[FTMS] Machine Control Acquired Successfully');
+    }
+  }
+}
+
+// --- NEW: Handle Status Events pushed by the Machine ---
+function handleMachineStatus(event) {
+  const dv = new DataView(event.target.value.buffer);
+  if (dv.byteLength >= 1) {
+    const op = dv.getUint8(0);
+    if (op === 0x02 && dv.byteLength >= 2) { 
+      // Op 0x02: Stopped or Paused by User
+      const param = dv.getUint8(1);
+      if (param === 0x01) emit(BUS.MACHINE_STOPPED);
+      if (param === 0x02) emit(BUS.MACHINE_PAUSED);
+    } else if (op === 0x04) {
+      // Op 0x04: Started or Resumed by User
+      emit(BUS.MACHINE_RESUMED);
+    }
+  }
 }
 
 function handleRowerData(event) {
@@ -135,9 +154,29 @@ export async function connectRower() {
 
   server = await device.gatt.connect();
   const service = await server.getPrimaryService(FTMS_SERVICE_UUID);
+  
+  // 1. Setup Rower Data
   rowerChar = await service.getCharacteristic(ROWER_DATA_CHAR_UUID);
   await rowerChar.startNotifications();
   rowerChar.addEventListener('characteristicvaluechanged', handleRowerData);
+  
+  // 2. Setup Control Point (Optional, won't fail if machine doesn't support it)
+  try {
+    controlChar = await service.getCharacteristic(FTMS_CONTROL_POINT_UUID);
+    await controlChar.startNotifications(); // Technically indications, Web BLE uses the same method
+    controlChar.addEventListener('characteristicvaluechanged', handleControlResponse);
+    
+    // Instantly Request Control of the Machine!
+    await controlChar.writeValue(new Uint8Array([0x00]).buffer);
+  } catch(e) { console.warn('[FTMS] Control Point unavailable'); }
+
+  // 3. Setup Machine Status (Optional)
+  try {
+    statusChar = await service.getCharacteristic(FTMS_STATUS_UUID);
+    await statusChar.startNotifications();
+    statusChar.addEventListener('characteristicvaluechanged', handleMachineStatus);
+  } catch(e) { console.warn('[FTMS] Status unavailable'); }
+
   emit(BUS.CONNECTED);
 }
 
@@ -146,11 +185,41 @@ export function disconnectRower() {
     rowerChar.removeEventListener('characteristicvaluechanged', handleRowerData);
     rowerChar.stopNotifications().catch(() => {});
   }
+  if (controlChar) {
+    controlChar.removeEventListener('characteristicvaluechanged', handleControlResponse);
+    controlChar.stopNotifications().catch(() => {});
+  }
+  if (statusChar) {
+    statusChar.removeEventListener('characteristicvaluechanged', handleMachineStatus);
+    statusChar.stopNotifications().catch(() => {});
+  }
   if (server?.connected) server.disconnect();
+  
   rowerChar = null;
+  controlChar = null;
+  statusChar = null;
   server = null;
   device = null;
+  hasControl = false;
   emit(BUS.DISCONNECTED);
+}
+
+// --- NEW: Command Sender ---
+export async function sendMachineCommand(cmd) {
+  if (!controlChar || !hasControl) return;
+  try {
+    let payload;
+    if (cmd === 'START') payload = new Uint8Array([0x07]);
+    else if (cmd === 'PAUSE') payload = new Uint8Array([0x08, 0x02]);
+    else if (cmd === 'STOP') payload = new Uint8Array([0x08, 0x01]);
+
+    if (payload) {
+      await controlChar.writeValue(payload.buffer);
+      console.log(`[FTMS] Sent Remote Command: ${cmd}`);
+    }
+  } catch (error) {
+    console.warn(`[FTMS] Failed to send command ${cmd}:`, error);
+  }
 }
 
 export function resetRowerSession() {
