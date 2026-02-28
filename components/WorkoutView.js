@@ -51,6 +51,29 @@ const activeTimers = new Set();
 let uiCache = {};
 let _lastMetrics = {};
 
+function isMetricSupported(state, key) {
+  return state.supportedMetrics?.[key] === true;
+}
+
+function getDashboardMetricsHTML(state) {
+  const metrics = [
+    { key: 'distanceMeters', label: 'Dist', id: 'display-dist', value: `${Math.round(state.rowerData?.distance || 0)}m` },
+    { key: 'avgPowerWatts', label: 'Watts', id: 'display-watts', value: `${Math.round(state.rowerData?.watts || 0)}` },
+    { key: 'driveLength', label: 'Drive Len', id: 'display-drive-len', value: '--' },
+    { key: 'driveTime', label: 'Drive Time', id: 'display-drive-time', value: '--' },
+    { key: 'peakForce', label: 'Peak Force', id: 'display-peak-force', value: '--' },
+    { key: 'workPerStroke', label: 'Work/Stroke', id: 'display-work-stroke', value: '--' },
+    { key: 'strokeDistM', label: 'Stroke Dist', id: 'display-stroke-dist', value: '--' },
+    { key: 'dragFactor', label: 'Drag Factor', id: 'display-drag', value: '--' },
+  ];
+
+  return metrics
+    .filter(metric => isMetricSupported(state, metric.key))
+    .map(metric => `<div class="metric-item"><div class="metric-label muted">${metric.label}</div><div id="${metric.id}" class="metric-value">${metric.value}</div></div>`)
+    .join('');
+}
+
+
 function scheduleTimer(callback, delay) {
   const timerId = setTimeout(() => {
     callback();
@@ -295,14 +318,7 @@ export function renderWorkoutView(state) {
         <!-- DASHBOARD -->
         <div class="area-dashboard dashboard-scroll-wrapper">
           <div class="secondary-metrics">
-            <div class="metric-item"><div class="metric-label muted">Dist</div><div id="display-dist" class="metric-value">${Math.round(state.rowerData?.distance || 0)}m</div></div>
-            <div class="metric-item"><div class="metric-label muted">Watts</div><div id="display-watts" class="metric-value">${Math.round(state.rowerData?.watts || 0)}</div></div>
-            <div class="metric-item"><div class="metric-label muted">Drive Len</div><div id="display-drive-len" class="metric-value">--</div></div>
-            <div class="metric-item"><div class="metric-label muted">Drive Time</div><div id="display-drive-time" class="metric-value">--</div></div>
-            <div class="metric-item"><div class="metric-label muted">Peak Force</div><div id="display-peak-force" class="metric-value">--</div></div>
-            <div class="metric-item"><div class="metric-label muted">Work/Stroke</div><div id="display-work-stroke" class="metric-value">--</div></div>
-            <div class="metric-item"><div class="metric-label muted">Stroke Dist</div><div id="display-stroke-dist" class="metric-value">--</div></div>
-            <div class="metric-item"><div class="metric-label muted">Drag Factor</div><div id="display-drag" class="metric-value">--</div></div>
+            ${getDashboardMetricsHTML(state)}
           </div>
         </div>
       </div>
@@ -517,14 +533,14 @@ export function updateWorkoutView(state) {
   if (hr) updateHRHistory(hr);
 
   // 8. Update Dashboard Metrics
-  if (uiCache.displayDist)       uiCache.displayDist.textContent       = `${Math.round(state.rowerData?.distance || 0)}m`;
-  if (uiCache.displayWatts)      uiCache.displayWatts.textContent      = Math.round(state.rowerData?.watts || 0);
-  if (uiCache.displayDriveLen)   uiCache.displayDriveLen.textContent   = state.rowerData.driveLength ? state.rowerData.driveLength.toFixed(2) + 'm' : '--';
-  if (uiCache.displayDriveTime)  uiCache.displayDriveTime.textContent  = state.rowerData.driveTime ? state.rowerData.driveTime.toFixed(2) + 's' : '--';
-  if (uiCache.displayPeakForce)  uiCache.displayPeakForce.textContent  = state.rowerData.peakForce ? `${Math.round(state.rowerData.peakForce)} lbf` : '--';
-  if (uiCache.displayWorkStroke) uiCache.displayWorkStroke.textContent = state.rowerData.workPerStroke ? `${Math.round(state.rowerData.workPerStroke)} J` : '--';
-  if (uiCache.displayStrokeDist) uiCache.displayStrokeDist.textContent = state.rowerData.strokeDistM ? `${state.rowerData.strokeDistM.toFixed(2)}m` : '--';
-  if (uiCache.displayDrag)       uiCache.displayDrag.textContent       = state.rowerData.dragFactor || '--';
+  if (uiCache.displayDist && isMetricSupported(state, 'distanceMeters')) uiCache.displayDist.textContent = `${Math.round(state.rowerData?.distance || 0)}m`;
+  if (uiCache.displayWatts && isMetricSupported(state, 'avgPowerWatts')) uiCache.displayWatts.textContent = Math.round(state.rowerData?.watts || 0);
+  if (uiCache.displayDriveLen && isMetricSupported(state, 'driveLength')) uiCache.displayDriveLen.textContent = state.rowerData.driveLength ? state.rowerData.driveLength.toFixed(2) + 'm' : '--';
+  if (uiCache.displayDriveTime && isMetricSupported(state, 'driveTime')) uiCache.displayDriveTime.textContent = state.rowerData.driveTime ? state.rowerData.driveTime.toFixed(2) + 's' : '--';
+  if (uiCache.displayPeakForce && isMetricSupported(state, 'peakForce')) uiCache.displayPeakForce.textContent = state.rowerData.peakForce ? `${Math.round(state.rowerData.peakForce)} lbf` : '--';
+  if (uiCache.displayWorkStroke && isMetricSupported(state, 'workPerStroke')) uiCache.displayWorkStroke.textContent = state.rowerData.workPerStroke ? `${Math.round(state.rowerData.workPerStroke)} J` : '--';
+  if (uiCache.displayStrokeDist && isMetricSupported(state, 'strokeDistM')) uiCache.displayStrokeDist.textContent = state.rowerData.strokeDistM ? `${state.rowerData.strokeDistM.toFixed(2)}m` : '--';
+  if (uiCache.displayDrag && isMetricSupported(state, 'dragFactor')) uiCache.displayDrag.textContent = state.rowerData.dragFactor || '--';
 
   // 9. Update Pacer Actual Value
   if (uiCache.pacerSPM) {
