@@ -474,8 +474,6 @@ function setupEventHandlers(container, workout, state, rawStrokes) {
       window.dispatchEvent(new CustomEvent(`nav:${previous}`));
     };
   }
-    };
-  }
 
   const viewWhole = container.querySelector('#viewWhole');
   const viewInterval = container.querySelector('#viewInterval');
