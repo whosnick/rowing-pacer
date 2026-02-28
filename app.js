@@ -83,6 +83,32 @@ const state = {
     dragFactor: 0   // NEW
   },
 
+  // Which metrics are actually provided by the currently connected rower.
+  supportedMetrics: {
+    spm: false,
+    strokeCount: false,
+    distanceMeters: false,
+    currentPaceSec: false,
+    avgPowerWatts: false,
+    totalCals: false,
+    elapsedTimeSec: false,
+    heartrate: false,
+    driveLength: false,
+    driveTime: false,
+    peakForce: false,
+    workPerStroke: false,
+    strokeDistM: false,
+    dragFactor: false,
+  },
+
+  // Baseline values at workout start so displayed values are workout-relative.
+  sessionOffsets: {
+    strokeCount: 0,
+    distanceMeters: 0,
+    totalCals: 0,
+    elapsedTimeSec: 0,
+  },
+
   // hrData is now populated from rower rower data (no separate HR monitor needed)
   hrData: {
     hr: null,
@@ -448,6 +474,11 @@ function setupBusSubscriptions() {
 }
 
 function handleBusTick(data) {
+  const relativeStrokeCount = Math.max(0, (data.strokeCount || 0) - (state.sessionOffsets.strokeCount || 0));
+  const relativeDistance = Math.max(0, (data.distanceMeters || 0) - (state.sessionOffsets.distanceMeters || 0));
+  const relativeCals = Math.max(0, (data.totalCals || 0) - (state.sessionOffsets.totalCals || 0));
+  const relativeElapsed = Math.max(0, (data.elapsedTimeSec || 0) - (state.sessionOffsets.elapsedTimeSec || 0));
+
   if (data.heartrate !== null && data.heartrate !== undefined) {
     state.peakHR = Math.max(state.peakHR || 0, data.heartrate);
   }
@@ -458,12 +489,12 @@ function handleBusTick(data) {
 
   state.rowerData = {
     spm: data.spm,
-    strokes: data.strokeCount,
-    distance: data.distanceMeters,
+    strokes: relativeStrokeCount,
+    distance: relativeDistance,
     pace: data.currentPaceSec,
     watts: data.avgPowerWatts,
-    cals: data.totalCals,
-    duration: data.elapsedTimeSec,
+    cals: relativeCals,
+    duration: relativeElapsed,
     driveLength: data.driveLength,
     driveTime: data.driveTime,
     dragFactor: data.dragFactor,
@@ -475,6 +506,20 @@ function handleBusTick(data) {
     ...data
   };
 
+  if (data.supportedMetrics) {
+    for (const [metric, supported] of Object.entries(data.supportedMetrics)) {
+      state.supportedMetrics[metric] = state.supportedMetrics[metric] || !!supported;
+    }
+  }
+
+  if (data.heartrate != null) state.supportedMetrics.heartrate = true;
+  if (data.driveLength != null) state.supportedMetrics.driveLength = true;
+  if (data.driveTime != null) state.supportedMetrics.driveTime = true;
+  if (data.peakForce != null) state.supportedMetrics.peakForce = true;
+  if (data.workPerStroke != null) state.supportedMetrics.workPerStroke = true;
+  if (data.strokeDistM != null) state.supportedMetrics.strokeDistM = true;
+  if (data.dragFactor != null) state.supportedMetrics.dragFactor = true;
+
   if (data.heartrate !== null) {
     state.hrData.hr = data.heartrate;
     state.hrConnected = true;
@@ -484,6 +529,7 @@ function handleBusTick(data) {
   } else {
     state.hrData.hr = null;
     state.hrData.zone = null;
+    state.hrConnected = false;
   }
 
   driveFSMFromRower(data);
@@ -645,6 +691,13 @@ function resetRowerData() {
     duration: 0, heartrate: null, workoutState: 0, rowingState: 0,
     isActive: false, workoutActive: false
   };
+
+  state.sessionOffsets = {
+    strokeCount: 0,
+    distanceMeters: 0,
+    totalCals: 0,
+    elapsedTimeSec: 0,
+  };
 }
 
 function calculateIntervalProgress() {
@@ -678,6 +731,12 @@ function checkIntervalCompletion() {
 function handleWorkoutStart() {
   console.log('[App] Starting new workout...');
   resetZoneTracking();
+  state.sessionOffsets = {
+    strokeCount: state.rowerData.strokes || 0,
+    distanceMeters: state.rowerData.distance || 0,
+    totalCals: state.rowerData.cals || 0,
+    elapsedTimeSec: state.rowerData.duration || 0,
+  };
   // removed: resetRowerSession();  <-- Was destroying data arriving in the same tick!
   // removed: resetRowerData();   <-- Was destroying data arriving in the same tick!
   setupIntervalStart();

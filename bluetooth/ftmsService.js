@@ -16,6 +16,16 @@ const dataPayload = {
   elapsedTimeSec: 0,
   heartrate: null,
   isActive: false,
+  supportedMetrics: {
+    spm: false,
+    strokeCount: false,
+    distanceMeters: false,
+    currentPaceSec: false,
+    avgPowerWatts: false,
+    totalCals: false,
+    elapsedTimeSec: false,
+    heartrate: false,
+  },
 };
 
 function parseRowerData(buffer) {
@@ -35,6 +45,16 @@ function parseRowerData(buffer) {
   const elapsedTimePresent = !!(flags & 0x0800);
 
   const out = { moreData };
+  const supportedMetrics = {
+    spm: !moreData,
+    strokeCount: !moreData,
+    distanceMeters: totalDistPresent,
+    currentPaceSec: instPacePresent,
+    avgPowerWatts: avgPowerPresent,
+    totalCals: expEnergyPresent,
+    elapsedTimeSec: elapsedTimePresent,
+    heartrate: hrPresent,
+  };
 
   // Stroke rate + stroke count are only present when the "more data" flag is clear.
   if (!moreData && o + 3 <= dv.byteLength) {
@@ -78,6 +98,8 @@ function parseRowerData(buffer) {
     out.elapsedTimeSec = dv.getUint16(o, true);
   }
 
+  out.supportedMetrics = supportedMetrics;
+
   return out;
 }
 
@@ -86,7 +108,6 @@ function handleRowerData(event) {
   if (!value) return;
 
   const parsed = parseRowerData(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
-  if (parsed.moreData) return;
 
   Object.assign(dataPayload, parsed);
   dataPayload.isActive = (dataPayload.spm || 0) > 0 || (dataPayload.currentPaceSec || 0) > 0;
