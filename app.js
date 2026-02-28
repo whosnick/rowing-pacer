@@ -14,11 +14,13 @@ import {
   reconnect,
   sendMachineCommand
 } from './bluetooth/ftmsService.js';
+
 import {
   connectHRMonitor,
   disconnectHRMonitor,
   isHRMonitorConnected
 } from './bluetooth/hrService.js';
+
 import { on, BUS } from './utils/telemetryBus.js';
 import { WorkoutFSM, WS, WE } from './utils/WorkoutFSM.js';
 import { initBuffer, pushStroke, finalizeBuffer } from './utils/telemetryBuffer.js';
@@ -66,7 +68,7 @@ const state = {
 
   // Editor & Programs
   editingWorkout: null,
-  programs:[], // Unified list (templates + custom)
+  programs: [], // Unified list (templates + custom)
 
   // Rower data – now sourced from rower consolidated dataPayload
   rowerData: {
@@ -103,13 +105,13 @@ const state = {
   peakRestDistanceM: 0,
 
   // Split/Interval data captured during workout
-  splits:[],
+  splits: [],
 
   // Current workout session ID
   currentWorkoutId: null,
 
   // History
-  history:[],
+  history: [],
 
   // Detail view state
   detailWorkoutId: null
@@ -119,8 +121,12 @@ let workoutTimer = null;
 let zoneTrackingTimer = null;
 let wakeLock = null;
 let fsm = null;
-let busUnsubs =[];
-let currentWorkoutId = null;
+let busUnsubs = [];
+
+// --- NEW: Ghost Packet Counter for Snappy Pausing ---
+// Counts how many "Resume" (04) signals we get while the user is actually coasting.
+// If this hits 2, we force a pause.
+let ghostPacketCount = 0;
 
 async function init() {
   console.log('[App] Initializing...');
@@ -200,7 +206,7 @@ async function loadHistory() {
     console.log(`[App] History loaded: ${state.history.length} workouts`);
   } catch (error) {
     console.error('[App] Failed to load history:', error);
-    state.history =[];
+    state.history = [];
   }
 }
 
@@ -221,7 +227,7 @@ async function loadPrograms() {
     console.log(`[App] Programs loaded: ${state.programs.length} programs`);
   } catch (error) {
     console.error('[App] Failed to load programs:', error);
-    state.programs =[];
+    state.programs = [];
   }
 }
 
@@ -269,9 +275,9 @@ function setupEventListeners() {
     state.intervalStartValue = 0;
     state.intervalCurrentProgress = 0;
     state.workoutStatus = 'idle';
-    state._lastSplitNumber = -1;
-    fsm.reset(); // Returns FSM to IDLE so it accepts ROWING events again
-
+    
+    // Reset FSM and Data
+    fsm.reset(); 
     resetRowerSession();
     resetRowerData();
     resetZoneTracking();
@@ -366,7 +372,12 @@ function setupFSM() {
         startWorkoutTimers();
       }
       
-      sendMachineCommand('START'); // Tell the physical machine to wake up / resume
+      // Reset Ghost Counter on entry to active state
+      ghostPacketCount = 0;
+      
+      // Tell the physical machine to wake up / resume
+      sendMachineCommand('START'); 
+      
       state.workoutStatus = 'active';
       render();
     },
@@ -376,6 +387,8 @@ function setupFSM() {
   fsm.on(WS.PAUSED, {
     onEnter: () => {
       stopWorkoutTimers();
+      ghostPacketCount = 0; // Reset counter
+      
       sendMachineCommand('PAUSE'); // Freeze the physical machine LCD
       state.workoutStatus = 'paused';
       render();
@@ -425,7 +438,7 @@ function setupFSM() {
 }
 
 function setupBusSubscriptions() {
-  busUnsubs =[
+  busUnsubs = [
     on(BUS.TICK, handleBusTick),
     on(BUS.STROKE, (data) => {
       if (fsm.state === WS.ACTIVE) {
@@ -477,17 +490,65 @@ function setupBusSubscriptions() {
         render();
       }
     }),
-    // Sync physical monitor button presses to App
-    on(BUS.MACHINE_PAUSED, () => {
-      if (fsm && fsm.state === WS.ACTIVE) fsm.send(WE.PAUSE);
-    }),
-    on(BUS.MACHINE_STOPPED, () => {
-      if (fsm && (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED)) fsm.send(WE.USER_STOP);
-    }),
+    
+    // --- TRUST THE MACHINE LOGIC (WITH GHOST FILTERING) ---
+    
+    // 1. Machine Resumed (Physical Button or Pulling)
     on(BUS.MACHINE_RESUMED, () => {
-      if (fsm && fsm.state === WS.PAUSED) fsm.send(WE.RESUME);
-      else if (fsm && fsm.state === WS.IDLE && state.workout) handleWorkoutStart();
-    })
+      const currentInterval = state.workout?.intervals[state.currentIntervalIndex];
+      const isRestingPhase = currentInterval?.phase === 'rest';
+
+      // CASE A: User is actually pulling (Data is active)
+      if (state.rowerData.isActive) {
+        ghostPacketCount = 0; // Reset counter, this is a real resume
+        
+        if (fsm.state === WS.PAUSED) {
+          fsm.send(WE.RESUME);
+        } else if (fsm.state === WS.IDLE && state.workout) {
+          // Only auto-start from IDLE if data is also active
+          handleWorkoutStart();
+        }
+      } 
+      
+      // CASE B: User stopped pulling (Coasting), but machine sends "04" (Ghost Packet)
+      else if (!state.rowerData.isActive && fsm.state === WS.ACTIVE) {
+        
+        // Don't auto-pause if we are in a specific Rest Interval (we want to see the timer run)
+        if (!isRestingPhase) {
+          ghostPacketCount++;
+          console.log(`[App] Ghost Packet Detected: ${ghostPacketCount}/2`);
+          
+          // Trigger Pause on the 2nd Ghost Packet (~2 seconds after stop)
+          if (ghostPacketCount >= 2) {
+            console.log('[App] Coasting detected (2x Ghost Packets). Force Pausing.');
+            fsm.send(WE.PAUSE);
+            ghostPacketCount = 0;
+          }
+        }
+      }
+    }),
+
+    // 2. Machine Paused (Physical Button or Timeout)
+    on(BUS.MACHINE_PAUSED, () => {
+      if (fsm.state === WS.ACTIVE) {
+        // If the machine officially pauses (0x02), we generally obey it.
+        // BUT: If the app *wanted* a rest interval, we verify context.
+        const currentInterval = state.workout?.intervals[state.currentIntervalIndex];
+        
+        // If we are NOT in a rest interval, and the machine paused, 
+        // it means the user paused it or it timed out.
+        if (currentInterval?.phase !== 'rest') {
+           fsm.send(WE.PAUSE);
+        }
+      }
+    }),
+
+    // 3. Machine Stopped (Physical Button)
+    on(BUS.MACHINE_STOPPED, () => {
+      if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) {
+        fsm.send(WE.USER_STOP);
+      }
+    }),
   ];
 }
 
@@ -532,7 +593,12 @@ function handleBusTick(data) {
     state.hrConnected = false;
   }
 
-  driveFSMFromRower(data);
+  // NOTE: driveFSMFromRower is no longer needed for auto-pause logic 
+  // because setupBusSubscriptions handles all state changes now via Machine Status!
+  // However, we still check for initial auto-start from data here.
+  if (fsm.state === WS.IDLE && data.isActive && state.workout) {
+      handleWorkoutStart();
+  }
 
   if (state.workoutStatus === 'active' && state.workout) {
     checkIntervalCompletion();
@@ -540,27 +606,6 @@ function handleBusTick(data) {
 
   if (state.view === 'workout') {
     updateWorkoutView(state);
-  }
-}
-
-function driveFSMFromRower(data) {
-  if (!state.workout) return;
-
-  const currentInterval = state.workout.intervals[state.currentIntervalIndex];
-  const isRestingPhase = currentInterval?.phase === 'rest';
-
-  if (fsm.state === WS.IDLE && data.isActive) {
-    handleWorkoutStart();
-    return;
-  }
-
-  // Do not auto-pause the FSM if we are in an intentional Rest interval
-  if (fsm.state === WS.ACTIVE && !data.isActive) {
-    if (!isRestingPhase) {
-       fsm.send(WE.PAUSE);
-    }
-  } else if (fsm.state === WS.PAUSED && data.isActive) {
-    fsm.send(WE.RESUME);
   }
 }
 
@@ -746,6 +791,8 @@ function checkIntervalCompletion() {
 function handleWorkoutStart() {
   console.log('[App] Starting new workout...');
   resetZoneTracking();
+  ghostPacketCount = 0; // Reset
+  
   state.sessionOffsets = {
     strokeCount: state.rowerData.strokes || 0,
     distanceMeters: state.rowerData.distance || 0,
@@ -783,8 +830,8 @@ function handleWorkoutCancel() {
   state.currentWorkoutId = null;
 
   state.splits = [];
-  state.workoutPaceHistory =[];
-  state.workoutHrHistory =[];
+  state.workoutPaceHistory = [];
+  state.workoutHrHistory = [];
   state.lastSavedState = null;
   resetZoneTracking();
 
@@ -844,12 +891,12 @@ async function saveWorkoutToHistory() {
     calories: state.rowerData.cals,
     zoneDistribution: zoneDistribution,
     intervalCount: state.workout?.intervals?.length || 0,
-    intervals: state.workout?.intervals ||[],
-    splits: state.splits ||[],
+    intervals: state.workout?.intervals || [],
+    splits: state.splits || [],
   };
 
   // Add interval boundaries for later analysis (unchanged)
-  const intervalBoundaries =[];
+  const intervalBoundaries = [];
   let currentTime = 0;
   for (let i = 0; i < state.workout.intervals.length; i++) {
     intervalBoundaries.push({

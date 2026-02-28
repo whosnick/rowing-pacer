@@ -8,11 +8,19 @@ import {
 } from '../utils/constants.js';
 import { emit, BUS } from '../utils/telemetryBus.js';
 
+// Merach/FTMS specific UUIDs
+const TRAINING_STATUS_UUID = '00002ad3-0000-1000-8000-00805f9b34fb';
+
 let device = null;
 let server = null;
+
+// Characteristics
 let rowerChar = null;
 let controlChar = null;
 let statusChar = null;
+let trainingStatusChar = null;
+
+// State Tracking
 let hasControl = false;
 let lastStrokeCount = 0;
 
@@ -90,46 +98,19 @@ function parseRowerData(buffer) {
   return out;
 }
 
-// --- NEW: Handle Responses from the Machine ---
-function handleControlResponse(event) {
-  const dv = new DataView(event.target.value.buffer);
-  if (dv.byteLength >= 3 && dv.getUint8(0) === 0x80) { // 0x80 = Response Code
-    const reqOp = dv.getUint8(1);
-    const result = dv.getUint8(2);
-    
-    // If the machine says Success (0x01) to Request Control (0x00)
-    if (reqOp === 0x00 && result === 0x01) {
-      hasControl = true;
-      console.log('[FTMS] Machine Control Acquired Successfully');
-    }
-  }
-}
-
-// --- NEW: Handle Status Events pushed by the Machine ---
-function handleMachineStatus(event) {
-  const dv = new DataView(event.target.value.buffer);
-  if (dv.byteLength >= 1) {
-    const op = dv.getUint8(0);
-    if (op === 0x02 && dv.byteLength >= 2) { 
-      // Op 0x02: Stopped or Paused by User
-      const param = dv.getUint8(1);
-      if (param === 0x01) emit(BUS.MACHINE_STOPPED);
-      if (param === 0x02) emit(BUS.MACHINE_PAUSED);
-    } else if (op === 0x04) {
-      // Op 0x04: Started or Resumed by User
-      emit(BUS.MACHINE_RESUMED);
-    }
-  }
-}
-
 function handleRowerData(event) {
   const value = event.target.value;
   if (!value) return;
 
   const parsed = parseRowerData(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
 
+  // --- RAW ACTIVITY DETECTION (No Debounce) ---
+  // Relying on the machine to only send 0s when actually stopped.
+  // This allows the Ghost Packet logic in app.js to trigger instantly.
+  dataPayload.isActive = (parsed.spm > 0) || (parsed.currentPaceSec > 0);
+  // --------------------------------------------
+
   Object.assign(dataPayload, parsed);
-  dataPayload.isActive = (dataPayload.spm || 0) > 0 || (dataPayload.currentPaceSec || 0) > 0;
 
   emit(BUS.TICK, { ...dataPayload });
 
@@ -145,6 +126,51 @@ function handleRowerData(event) {
   }
 }
 
+// --- MACHINE STATUS HANDLERS ---
+
+function handleMachineStatus(event) {
+  const dv = new DataView(event.target.value.buffer);
+  if (dv.byteLength < 1) return;
+
+  const op = dv.getUint8(0);
+  
+  // 0x04: "Started or Resumed by User"
+  if (op === 0x04) {
+    console.log('[FTMS] Status: Machine Resumed (0x04)');
+    emit(BUS.MACHINE_RESUMED);
+  }
+  // 0x02: "Stopped or Paused by User"
+  else if (op === 0x02 && dv.byteLength >= 2) {
+    const param = dv.getUint8(1);
+    if (param === 0x01) {
+      console.log('[FTMS] Status: Machine Stopped (0x02 0x01)');
+      emit(BUS.MACHINE_STOPPED);
+    } else if (param === 0x02) {
+      console.log('[FTMS] Status: Machine Paused (0x02 0x02)');
+      emit(BUS.MACHINE_PAUSED);
+    }
+  }
+}
+
+function handleTrainingStatus(event) {
+  // 0x01 0x0D (Manual Mode) typically implies a Start/Resume event on Merach
+  console.log('[FTMS] Training Status Update (0x2AD3)');
+  emit(BUS.MACHINE_RESUMED); 
+}
+
+function handleControlResponse(event) {
+  const dv = new DataView(event.target.value.buffer);
+  // Check for Response OpCode (0x80) -> Request OpCode (0x00) -> Success (0x01)
+  if (dv.byteLength >= 3 && dv.getUint8(0) === 0x80) {
+    if (dv.getUint8(1) === 0x00 && dv.getUint8(2) === 0x01) {
+      hasControl = true;
+      console.log('[FTMS] Control Acquired Successfully');
+    }
+  }
+}
+
+// --- EXPORTED FUNCTIONS ---
+
 export async function connectRower() {
   device = await navigator.bluetooth.requestDevice({
     filters: [{ services: [FTMS_SERVICE_UUID] }],
@@ -155,71 +181,54 @@ export async function connectRower() {
   server = await device.gatt.connect();
   const service = await server.getPrimaryService(FTMS_SERVICE_UUID);
   
-  // 1. Setup Rower Data
+  // 1. Rower Data
   rowerChar = await service.getCharacteristic(ROWER_DATA_CHAR_UUID);
   await rowerChar.startNotifications();
   rowerChar.addEventListener('characteristicvaluechanged', handleRowerData);
   
-  // 2. Setup Control Point (Optional, won't fail if machine doesn't support it)
+  // 2. Control Point
   try {
     controlChar = await service.getCharacteristic(FTMS_CONTROL_POINT_UUID);
-    await controlChar.startNotifications(); // Technically indications, Web BLE uses the same method
+    await controlChar.startNotifications();
     controlChar.addEventListener('characteristicvaluechanged', handleControlResponse);
-    
-    // Instantly Request Control of the Machine!
-    await controlChar.writeValue(new Uint8Array([0x00]).buffer);
+    await controlChar.writeValue(new Uint8Array([0x00]).buffer); 
   } catch(e) { console.warn('[FTMS] Control Point unavailable'); }
 
-  // 3. Setup Machine Status (Optional)
+  // 3. Machine Status
   try {
     statusChar = await service.getCharacteristic(FTMS_STATUS_UUID);
     await statusChar.startNotifications();
     statusChar.addEventListener('characteristicvaluechanged', handleMachineStatus);
   } catch(e) { console.warn('[FTMS] Status unavailable'); }
 
+  // 4. Training Status
+  try {
+    trainingStatusChar = await service.getCharacteristic(TRAINING_STATUS_UUID);
+    await trainingStatusChar.startNotifications();
+    trainingStatusChar.addEventListener('characteristicvaluechanged', handleTrainingStatus);
+  } catch(e) { console.warn('[FTMS] Training Status unavailable'); }
+
   emit(BUS.CONNECTED);
 }
 
 export function disconnectRower() {
-  if (rowerChar) {
-    rowerChar.removeEventListener('characteristicvaluechanged', handleRowerData);
-    rowerChar.stopNotifications().catch(() => {});
-  }
-  if (controlChar) {
-    controlChar.removeEventListener('characteristicvaluechanged', handleControlResponse);
-    controlChar.stopNotifications().catch(() => {});
-  }
-  if (statusChar) {
-    statusChar.removeEventListener('characteristicvaluechanged', handleMachineStatus);
-    statusChar.stopNotifications().catch(() => {});
-  }
+  const chars = [rowerChar, controlChar, statusChar, trainingStatusChar];
+  chars.forEach(c => {
+    if (c) {
+      try { c.stopNotifications(); } catch(e) {}
+    }
+  });
+
   if (server?.connected) server.disconnect();
   
   rowerChar = null;
   controlChar = null;
   statusChar = null;
+  trainingStatusChar = null;
   server = null;
   device = null;
   hasControl = false;
   emit(BUS.DISCONNECTED);
-}
-
-// --- NEW: Command Sender ---
-export async function sendMachineCommand(cmd) {
-  if (!controlChar || !hasControl) return;
-  try {
-    let payload;
-    if (cmd === 'START') payload = new Uint8Array([0x07]);
-    else if (cmd === 'PAUSE') payload = new Uint8Array([0x08, 0x02]);
-    else if (cmd === 'STOP') payload = new Uint8Array([0x08, 0x01]);
-
-    if (payload) {
-      await controlChar.writeValue(payload.buffer);
-      console.log(`[FTMS] Sent Remote Command: ${cmd}`);
-    }
-  } catch (error) {
-    console.warn(`[FTMS] Failed to send command ${cmd}:`, error);
-  }
 }
 
 export function resetRowerSession() {
@@ -234,9 +243,22 @@ export async function reconnect() {
   if (!device) throw new Error('No paired rower to reconnect');
   if (server?.connected) return;
   server = await device.gatt.connect();
-  const service = await server.getPrimaryService(FTMS_SERVICE_UUID);
-  rowerChar = await service.getCharacteristic(ROWER_DATA_CHAR_UUID);
-  await rowerChar.startNotifications();
-  rowerChar.addEventListener('characteristicvaluechanged', handleRowerData);
   emit(BUS.RECONNECTED);
+}
+
+export async function sendMachineCommand(cmd) {
+  if (!controlChar || !hasControl) return;
+  try {
+    let payload;
+    if (cmd === 'START') payload = new Uint8Array([0x07]);
+    else if (cmd === 'PAUSE') payload = new Uint8Array([0x08, 0x02]);
+    else if (cmd === 'STOP') payload = new Uint8Array([0x08, 0x01]);
+
+    if (payload) {
+      await controlChar.writeValue(payload.buffer);
+      console.log(`[FTMS] Sent Command: ${cmd}`);
+    }
+  } catch (error) {
+    console.warn(`[FTMS] Failed to send ${cmd}:`, error);
+  }
 }
