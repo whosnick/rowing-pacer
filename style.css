@@ -367,7 +367,7 @@ input[type="checkbox"] { cursor: pointer; }
   transform: translateX(-50%);
   width: 90%;
   z-index: 10;
-  background: rgba(15, 23, 42, 0.85); 
+  background: rgba(15, 23, 42, 0.55); 
   border: 1px solid var(--primary);
   color: white;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
@@ -392,7 +392,7 @@ input[type="checkbox"] { cursor: pointer; }
 }
 
 .hero-card {
-  background: rgba(30, 41, 59, 0.85); 
+  background: rgba(30, 41, 59, 0.55); 
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-radius: 0.75rem;

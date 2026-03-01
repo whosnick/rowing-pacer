@@ -107,6 +107,11 @@ function handleRowerData(event) {
   const parsed = parseRowerData(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
   const now = Date.now();
 
+  // FIX: Initialize the baseline on the first packet after a reset
+  if (lastProcessedDistance === -1) {
+    lastProcessedDistance = parsed.distanceMeters;
+  }
+
   const strokeIncreased = (parsed.strokeCount > lastStrokeCount);
   const distanceIncreased = (parsed.distanceMeters > lastProcessedDistance);
 
