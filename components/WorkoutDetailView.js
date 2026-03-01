@@ -4,7 +4,6 @@ import { formatTime, formatPace, formatDistance, formatHR, formatSPM } from '../
 import { HR_ZONES, UNITS } from '../utils/constants.js';
 import { getWorkout, getBleDataForWorkout } from '../utils/storage.js';
 import { icon } from '../utils/icons.js';
-import { buildIntervalBoundaries } from '../utils/intervals.js';
 
 // Canvas and graph state
 let canvas = null;
@@ -95,8 +94,6 @@ async function loadWorkoutData(workoutId, container, state) {
 }
 
 function processBleData(workout, rawStrokes, state) {
-  const boundaries = buildIntervalBoundaries(workout);
-  
   const timestamps = [];
   const hrValues = [];
   const paceValues = [];
@@ -140,53 +137,66 @@ function processBleData(workout, rawStrokes, state) {
 
   const intervalStats = [];
   const intervalStrokeData = [];
+  const intervalBoundaries = [];
   
-  if (boundaries.length > 0 && rawStrokes && rawStrokes.length > 0) {
-    let actualEndTime = 0;
-    let actualEndDist = 0;
+  if (workout.intervals && workout.intervals.length > 0 && rawStrokes && rawStrokes.length > 0) {
+    let strokeIndex = 0;
+    let currentWorkTime = 0;
+    let currentWorkDist = 0;
     
-    for (let i = 0; i < boundaries.length; i++) {
-      const boundary = boundaries[i];
-      const nextBoundary = boundaries[i + 1];
-      
-      if (workout.intervals[i]?.phase === 'rest') continue;
-      
+    for (let i = 0; i < workout.intervals.length; i++) {
       const intervalDef = workout.intervals[i];
+      const isRest = intervalDef.phase === 'rest';
       const isTimeBased = intervalDef.type === 'time';
       
-      let intervalStrokes;
+      const boundaryStart = isTimeBased ? currentWorkTime : currentWorkDist;
       
-      if (isTimeBased) {
-        const filterStartTime = actualEndTime;
-        const filterEndTime = filterStartTime + intervalDef.val;
+      let intervalStrokes = [];
+      let intervalStartTime = null;
+      let intervalStartDist = null;
+      
+      while (strokeIndex < rawStrokes.length) {
+        const s = rawStrokes[strokeIndex];
+        const strokeTime = s.t / 10;
+        const strokeDist = s.d / 10;
         
-        intervalStrokes = rawStrokes.filter(s => {
-          const strokeTime = s.t / 10;
-          return strokeTime >= filterStartTime && strokeTime < filterEndTime;
-        });
-        
-        actualEndTime = filterEndTime;
-        if (intervalStrokes.length > 0) {
-          actualEndDist = intervalStrokes[intervalStrokes.length - 1].d / 10;
+        if (intervalStartTime === null) {
+          intervalStartTime = strokeTime;
+          intervalStartDist = strokeDist;
         }
-      } else {
-        const filterStartDist = actualEndDist;
-        const filterEndDist = filterStartDist + intervalDef.val;
         
-        intervalStrokes = rawStrokes.filter(s => {
-          const strokeDist = s.d / 10;
-          return strokeDist >= filterStartDist && strokeDist < filterEndDist;
-        });
+        const elapsedInInterval = isTimeBased 
+          ? strokeTime - currentWorkTime 
+          : strokeDist - currentWorkDist;
         
-        if (intervalStrokes.length > 0) {
-          actualEndDist = intervalStrokes[intervalStrokes.length - 1].d / 10;
-          actualEndTime = intervalStrokes[intervalStrokes.length - 1].t / 10;
-        } else {
-          actualEndDist = filterEndDist;
+        if (elapsedInInterval >= intervalDef.val) {
+          break;
         }
+        
+        intervalStrokes.push(s);
+        strokeIndex++;
       }
-
+      
+      const boundaryEnd = isTimeBased 
+        ? (intervalStrokes.length > 0 ? rawStrokes[strokeIndex - 1].t / 10 : currentWorkTime)
+        : (intervalStrokes.length > 0 ? rawStrokes[strokeIndex - 1].d / 10 : currentWorkDist);
+      
+      intervalBoundaries.push({
+        index: i,
+        startTime: intervalStartTime !== null ? intervalStartTime : currentWorkTime,
+        startDist: intervalStartDist !== null ? intervalStartDist : currentWorkDist,
+        endTime: boundaryEnd,
+        type: intervalDef.type,
+        target: intervalDef.val,
+        phase: intervalDef.phase
+      });
+      
       if (intervalStrokes.length > 0) {
+        currentWorkTime = rawStrokes[strokeIndex - 1].t / 10;
+        currentWorkDist = rawStrokes[strokeIndex - 1].d / 10;
+      }
+      
+      if (!isRest && intervalStrokes.length > 0) {
         const baseT = intervalStrokes[0].t / 10;
         const baseD = intervalStrokes[0].d / 10;
         
@@ -222,6 +232,23 @@ function processBleData(workout, rawStrokes, state) {
         });
       }
     }
+    
+    for (let i = 0; i < timestamps.length; i++) {
+      const t = timestamps[i];
+      const d = distanceValues[i];
+      
+      for (let j = 0; j < intervalBoundaries.length; j++) {
+        const b = intervalBoundaries[j];
+        const inInterval = b.type === 'time'
+          ? t >= b.startTime && t <= b.endTime
+          : d >= b.startDist && d <= b.endTime;
+        
+        if (inInterval) {
+          intervalIndices[i] = j;
+          break;
+        }
+      }
+    }
   }
 
   return {
@@ -235,7 +262,7 @@ function processBleData(workout, rawStrokes, state) {
     avgPace,
     avgSPM,
     intervalStats,
-    intervalBoundaries: boundaries,
+    intervalBoundaries,
     intervalStrokeData,
     rawStrokes
   };

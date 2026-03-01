@@ -240,7 +240,7 @@ export function renderWorkoutView(state) {
           </div>
 
           <div id="guidanceMessage" class="guidance-strip overlaid">
-            ${getCurrentMessage() || 'Start rowing to begin'}
+            ${state.workoutStatus === 'active' ? (getCurrentMessage() || '') : (getCurrentMessage() || 'Start rowing')}
           </div>
         </div>
 
@@ -554,7 +554,11 @@ export function updateWorkoutView(state) {
     }
     if (uiCache.guidanceEl) {
       const msg = getCurrentMessage();
-      if (msg) uiCache.guidanceEl.textContent = msg;
+      if (state.workoutStatus === 'active') {
+        uiCache.guidanceEl.textContent = msg || '';
+      } else {
+        uiCache.guidanceEl.textContent = msg || 'Start rowing';
+      }
     }
   }
 

@@ -23,6 +23,8 @@ let trainingStatusChar = null;
 // State Tracking
 let hasControl = false;
 let lastStrokeCount = 0;
+let lastProcessedDistance = -1;
+let activeImmunityUntil = 0;
 
 const dataPayload = {
   spm: 0,
@@ -103,19 +105,30 @@ function handleRowerData(event) {
   if (!value) return;
 
   const parsed = parseRowerData(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  const now = Date.now();
 
-  // --- RAW ACTIVITY DETECTION (No Debounce) ---
-  // Relying on the machine to only send 0s when actually stopped.
-  // This allows the Ghost Packet logic in app.js to trigger instantly.
-  dataPayload.isActive = (parsed.spm > 0) || (parsed.currentPaceSec > 0);
-  // --------------------------------------------
+  const strokeIncreased = (parsed.strokeCount > lastStrokeCount);
+  const distanceIncreased = (parsed.distanceMeters > lastProcessedDistance);
+
+  if (strokeIncreased) {
+    dataPayload.isActive = true;
+    activeImmunityUntil = now + 6000;
+    lastStrokeCount = parsed.strokeCount;
+  } else {
+    if (now < activeImmunityUntil) {
+      dataPayload.isActive = true;
+    } else {
+      dataPayload.isActive = distanceIncreased;
+    }
+  }
+
+  lastProcessedDistance = parsed.distanceMeters;
 
   Object.assign(dataPayload, parsed);
 
   emit(BUS.TICK, { ...dataPayload });
 
-  if (typeof parsed.strokeCount === 'number' && parsed.strokeCount > lastStrokeCount) {
-    lastStrokeCount = parsed.strokeCount;
+  if (strokeIncreased) {
     emit(BUS.STROKE, {
       t: Math.round((dataPayload.elapsedTimeSec || 0) * 10),
       d: Math.round((dataPayload.distanceMeters || 0) * 10),
@@ -233,6 +246,8 @@ export function disconnectRower() {
 
 export function resetRowerSession() {
   lastStrokeCount = 0;
+  lastProcessedDistance = -1;
+  activeImmunityUntil = 0;
   Object.assign(dataPayload, {
     spm: 0, strokeCount: 0, distanceMeters: 0, currentPaceSec: 0, avgPowerWatts: 0,
     totalCals: 0, elapsedTimeSec: 0, heartrate: null, isActive: false,

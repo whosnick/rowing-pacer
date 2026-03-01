@@ -24,17 +24,14 @@ export function initBuffer(workoutId, templateId = null) {
 export function pushStroke(data) {
   if (!currentWorkoutId) return;
 
-  const pace = data.currentPaceSec || 0;
-  const watts = pace > 0 ? Math.round(2.8 / Math.pow(pace / 500, 3)) : 0;
-
   const stroke = {
-    t: Math.round((data.elapsedTimeSec || 0) * 10),
-    d: Math.round((data.distanceMeters || 0) * 10),
-    p: Math.round(pace * 10),
-    spm: Math.round(data.spm || 0),
-    hr: (data.heartrate && data.heartrate < 255) ? data.heartrate : null,
-    watts: watts,
-    elapsed_time: Math.round((data.elapsedTimeSec || 0) * 10) 
+    t: data.t || 0,
+    d: data.d || 0,
+    p: data.p || 0,
+    spm: data.spm || 0,
+    hr: (data.hr && data.hr < 255) ? data.hr : null,
+    watts: data.p > 0 ? Math.round(2.8 / Math.pow(data.p / 500, 3)) : 0,
+    elapsed_time: data.t || 0
   };
 
   buffer.push(stroke);
