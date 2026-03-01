@@ -6,9 +6,7 @@ A Progressive Web App for heart rate zone training on indoor rowing machines. Co
 ![Bluetooth](https://img.shields.io/badge/Bluetooth-FTMS-blue)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
-<img width="482" height="1049" alt="image" src="https://github.com/user-attachments/assets/86a01872-8298-482c-bdbf-98336493b31e" />
-
-
+<img width="483" height="1046" alt="image" src="https://github.com/user-attachments/assets/e8c91b5e-3313-48fd-adcc-3ae59c40bf56" />
 
 ## ✨ Features
 
