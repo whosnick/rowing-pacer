@@ -36,8 +36,6 @@ dist/
 build/
 CodeFlattened_Output/
 rawBleDataExport/
-LICENSE
-NOTICE
 *.pem
 implementation-spec-A-B.md
 *.png

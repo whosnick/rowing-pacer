@@ -1,0 +1,30 @@
+PowerRow PWA
+Copyright 2026 Sebastian Husnik
+
+This product is a derivative work based on Coxswain, which is:
+Copyright 2015 Sven Meier
+Licensed under the Apache License, Version 2.0
+
+Original project: https://github.com/svenmeier/coxswain
+
+================================================================================
+
+This project includes concepts and design inspiration from Coxswain:
+
+1. Program structure and workout segment logic
+2. Bluetooth connectivity approach for PM5/C2 rowers
+3. Workout metrics and data organization
+4. Core rowing training concepts
+
+Major changes in this derivative work:
+- Complete rewrite from Java/Android to JavaScript/React
+- Progressive Web App architecture
+- Modern UI with Tailwind CSS
+- Browser-based implementation using Web Bluetooth API
+- Simplified feature set focused on core functionality
+- No original source code retained from Coxswain
+
+================================================================================
+
+For the full Apache License 2.0 text, see the LICENSE file included with
+this distribution.
