@@ -34,6 +34,10 @@ export function pushStroke(data) {
     elapsed_time: data.t || 0
   };
 
+  if (stroke.hr) {
+    console.log('[TelemetryBuffer] Stroke saved with HR:', stroke.hr);
+  }
+
   buffer.push(stroke);
 }
 

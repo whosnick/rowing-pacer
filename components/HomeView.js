@@ -1,10 +1,16 @@
 
-// components/HomeView.js
 import { INTERVAL_PHASES, calculateHRMax, getHRZoneBoundaries } from '../utils/constants.js';
 import { getTTSSettings, setTTSSettings, testTTS } from '../utils/tts.js';
 import { icon } from '../utils/icons.js';
+import { on, off, BUS } from '../utils/telemetryBus.js';
+
+let hrUpdateUnsub = null;
 
 export default function renderHome(state) {
+  if (hrUpdateUnsub) {
+    hrUpdateUnsub();
+    hrUpdateUnsub = null;
+  }
   const container = document.createElement('div');
   container.className = 'view-container';
   container.style.padding = '1.5rem';
@@ -73,7 +79,7 @@ export default function renderHome(state) {
             </div>
             <div>
               <div style="font-weight: 600; color: white; font-size: 0.875rem;">Heart Rate Belt</div>
-              <div style="font-size: 0.75rem; color: var(--slate-400);">
+              <div id="homeHRDisplay" style="font-size: 0.75rem; color: var(--slate-400);">
                 ${state.hrConnected
                   ? `${state.hrData?.hr ?? '--'} bpm`
                   : 'Connect chest strap'}
@@ -162,16 +168,31 @@ export default function renderHome(state) {
     const settingsBtn = container.querySelector('#settingsBtn');
     if (settingsBtn) settingsBtn.onclick = () => showSettings(state);
 
-    // Favorite Workout Start
     const favStartBtn = container.querySelector('#startFavorite');
     if (favStartBtn && favoriteWorkout) {
         favStartBtn.onclick = () => {
             window.dispatchEvent(new CustomEvent('workout:select', { detail: favoriteWorkout }));
         };
     }
+
+    const hrDisplay = container.querySelector('#homeHRDisplay');
+    if (hrDisplay) {
+      hrUpdateUnsub = on(BUS.HR_DATA, (data) => {
+        if (data.heartrate) {
+          hrDisplay.textContent = `${data.heartrate} bpm`;
+        }
+      });
+    }
   }, 0);
 
   return container;
+}
+
+export function cleanupHomeView() {
+  if (hrUpdateUnsub) {
+    hrUpdateUnsub();
+    hrUpdateUnsub = null;
+  }
 }
 
 function renderWorkoutCard(workout) {

@@ -6,25 +6,39 @@ import {
   FTMS_CONTROL_POINT_UUID,
   FTMS_STATUS_UUID 
 } from '../utils/constants.js';
-import { emit, BUS } from '../utils/telemetryBus.js';
+import { emit, BUS, on } from '../utils/telemetryBus.js';
 
-// Merach/FTMS specific UUIDs
 const TRAINING_STATUS_UUID = '00002ad3-0000-1000-8000-00805f9b34fb';
 
 let device = null;
 let server = null;
 
-// Characteristics
 let rowerChar = null;
 let controlChar = null;
 let statusChar = null;
 let trainingStatusChar = null;
 
-// State Tracking
 let hasControl = false;
 let lastStrokeCount = 0;
 let lastProcessedDistance = -1;
 let activeImmunityUntil = 0;
+
+let commandQueue = [];
+let isSendingCommand = false;
+
+let externalHR = null;
+
+on(BUS.HR_DATA, (data) => {
+  if (data.heartrate) {
+    externalHR = data.heartrate;
+    console.log('[FTMS] External HR received:', externalHR);
+  }
+});
+
+on(BUS.HR_DISCONNECTED, () => {
+  externalHR = null;
+  console.log('[FTMS] External HR cleared');
+});
 
 const dataPayload = {
   spm: 0,
@@ -134,13 +148,17 @@ function handleRowerData(event) {
   emit(BUS.TICK, { ...dataPayload });
 
   if (strokeIncreased) {
+    const hrValue = externalHR || dataPayload.heartrate;
     emit(BUS.STROKE, {
       t: Math.round((dataPayload.elapsedTimeSec || 0) * 10),
       d: Math.round((dataPayload.distanceMeters || 0) * 10),
       p: Math.round((dataPayload.currentPaceSec || 0) * 10),
       spm: dataPayload.spm || 0,
-      hr: dataPayload.heartrate,
+      hr: hrValue,
     });
+    if (hrValue) {
+      console.log('[FTMS] Stroke emitted with HR:', hrValue);
+    }
   }
 }
 
@@ -246,6 +264,8 @@ export function disconnectRower() {
   server = null;
   device = null;
   hasControl = false;
+  commandQueue = [];
+  isSendingCommand = false;
   emit(BUS.DISCONNECTED);
 }
 
@@ -268,17 +288,39 @@ export async function reconnect() {
 
 export async function sendMachineCommand(cmd) {
   if (!controlChar || !hasControl) return;
-  try {
-    let payload;
-    if (cmd === 'START') payload = new Uint8Array([0x07]);
-    else if (cmd === 'PAUSE') payload = new Uint8Array([0x08, 0x02]);
-    else if (cmd === 'STOP') payload = new Uint8Array([0x08, 0x01]);
 
-    if (payload) {
-      await controlChar.writeValue(payload.buffer);
-      console.log(`[FTMS] Sent Command: ${cmd}`);
-    }
+  let payload;
+  if (cmd === 'START') payload = new Uint8Array([0x07]);
+  else if (cmd === 'PAUSE') payload = new Uint8Array([0x08, 0x02]);
+  else if (cmd === 'STOP') payload = new Uint8Array([0x08, 0x01]);
+  if (!payload) return;
+
+  commandQueue.push({ cmd, payload, retries: 0 });
+  processCommandQueue();
+}
+
+async function processCommandQueue() {
+  if (isSendingCommand || commandQueue.length === 0) return;
+
+  isSendingCommand = true;
+  const { cmd, payload, retries } = commandQueue[0];
+
+  try {
+    await controlChar.writeValue(payload.buffer);
+    console.log(`[FTMS] Sent Command: ${cmd}`);
+    commandQueue.shift();
   } catch (error) {
-    console.warn(`[FTMS] Failed to send ${cmd}:`, error);
+    if (error.message?.includes('GATT operation already in progress') && retries < 3) {
+      commandQueue[0].retries++;
+      console.log(`[FTMS] Retrying ${cmd} (attempt ${retries + 1})...`);
+    } else {
+      console.warn(`[FTMS] Failed to send ${cmd}:`, error);
+      commandQueue.shift();
+    }
+  } finally {
+    isSendingCommand = false;
+    if (commandQueue.length > 0) {
+      setTimeout(processCommandQueue, 100);
+    }
   }
 }

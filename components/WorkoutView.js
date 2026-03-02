@@ -442,6 +442,9 @@ export function updateWorkoutView(state) {
   if (uiCache.pacerTargetSPM) {
     uiCache.pacerTargetSPM.textContent = `T: ${currentInterval?.spm || '--'}`;
   }
+  if (spmPacer && currentInterval?.spm) {
+    spmPacer.setTargetSPM(currentInterval.spm);
+  }
   if (uiCache.displayTargetHR) {
     uiCache.displayTargetHR.textContent = currentInterval?.zone ? `Target: Zone ${currentInterval.zone}` : 'No target';
   }

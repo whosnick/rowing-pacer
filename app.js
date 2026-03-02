@@ -27,7 +27,7 @@ import { initBuffer, pushStroke, finalizeBuffer } from './utils/telemetryBuffer.
 import { updateZoneTime, getZoneDistribution, resetZoneTracking } from './utils/zoneTracker.js';
 
 import { renderWorkoutView, updateWorkoutView, cleanupWorkoutView, renderReconnectOverlay, removeReconnectOverlay } from './components/WorkoutView.js';
-import renderHome from './components/HomeView.js';
+import renderHome, { cleanupHomeView } from './components/HomeView.js';
 import renderProgramList from './components/ProgramListView.js';
 import renderHistory from './components/HistoryView.js';
 import renderSummary from './components/SummaryView.js';
@@ -108,6 +108,7 @@ let zoneTrackingTimer = null;
 let wakeLock = null;
 let fsm = null;
 let busUnsubs = [];
+let lastMachinePauseTime = 0;
 
 async function init() {
   console.log('[App] Initializing...');
@@ -193,10 +194,7 @@ function setupEventListeners() {
   window.addEventListener('nav:home', () => navigateTo('home'));
   window.addEventListener('nav:programs', () => navigateTo('programs'));
   window.addEventListener('nav:history', () => navigateTo('history'));
-  window.addEventListener('nav:summary', () => {
-    state.view = 'summary';
-    render();
-  });
+  window.addEventListener('nav:summary', () => navigateTo('summary'));
 
   window.addEventListener('nav:editor', (e) => {
     if (e.detail && e.detail.workout) {
@@ -342,20 +340,31 @@ function setupBusSubscriptions() {
       }
     }),
     
-    // We only listen for STOP because that is an explicit termination.
-    // Pause/Resume is handled 100% by the isActive flag logic in driveFSMFromData.
+    on(BUS.MACHINE_PAUSED, () => {
+      lastMachinePauseTime = Date.now();
+    }),
+    
     on(BUS.MACHINE_STOPPED, () => {
-      if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) {
+      if (fsm.state === WS.PAUSED) {
+        console.log('[App] Ignoring MACHINE_STOPPED - already paused (Merach auto-stop after pause)');
+        return;
+      }
+      if (Date.now() - lastMachinePauseTime < 3000) {
+        console.log('[App] Ignoring MACHINE_STOPPED - recent pause (Merach auto-stop after pause)');
+        return;
+      }
+      if (fsm.state === WS.ACTIVE) {
+        console.log('[App] Machine stopped during active workout - ending');
         fsm.send(WE.USER_STOP);
       }
     }),
 
     on(BUS.DISCONNECTED, () => {
       if (fsm.state === WS.ACTIVE || fsm.state === WS.PAUSED) fsm.send(WE.BLE_DISCONNECT);
-      else if (fsm.state === WS.IDLE) { state.bleConnected = false; render(); }
+      else if (fsm.state === WS.IDLE) { state.bleConnected = false; if (state.view !== 'workout-detail') render(); }
     }),
     on(BUS.RECONNECTED, () => { if (fsm.state === WS.DISCONNECTED) fsm.send(WE.BLE_RECONNECT); }),
-    on(BUS.CONNECTED, () => { state.bleConnected = true; render(); }),
+    on(BUS.CONNECTED, () => { state.bleConnected = true; if (state.view !== 'workout-detail') render(); }),
     on(BUS.RECONNECT_REQUEST, async () => { await reconnect(); }),
     on(BUS.HR_DATA, (data) => {
       state.hrData.hr = data.heartrate;
@@ -363,11 +372,10 @@ function setupBusSubscriptions() {
       if (state.userSettings?.hrMax) state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
       if (data.heartrate) state.peakHR = Math.max(state.peakHR || 0, data.heartrate);
       if (state.view === 'workout') updateWorkoutView(state);
-      else render();
     }),
     on(BUS.HR_DISCONNECTED, () => {
       state.hrConnected = false; state.hrData.hr = null; state.hrData.zone = null;
-      if (state.view === 'workout') updateWorkoutView(state); else render();
+      if (state.view === 'workout') updateWorkoutView(state);
     }),
   ];
 }
@@ -379,12 +387,11 @@ function handleBusTick(data) {
   const relativeElapsed = Math.max(0, (data.elapsedTimeSec || 0) - (state.sessionOffsets.elapsedTimeSec || 0));
 
   if (data.heartrate) state.peakHR = Math.max(state.peakHR || 0, data.heartrate);
-  if (data.restDistanceM) state.peakRestDistanceM = Math.max(state.peakRestDistanceM || 0, data.restDistanceM);
 
   state.rowerData = {
     spm: data.spm, strokes: relativeStrokeCount, distance: relativeDistance,
     pace: data.currentPaceSec, watts: data.avgPowerWatts, cals: relativeCals,
-    duration: relativeElapsed, heartrate: data.heartrate,
+    duration: relativeElapsed,
     workoutState: data.workoutState, rowingState: data.rowingState,
     isActive: data.isActive, workoutActive: data.isActive,
   };
@@ -395,7 +402,6 @@ function handleBusTick(data) {
     if (state.userSettings?.hrMax) state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
   }
 
-  // DRIVE FSM BASED PURELY ON PHYSICS (isActive)
   driveFSMFromData(data);
 
   if (state.workoutStatus === 'active' && state.workout) checkIntervalCompletion();
@@ -439,7 +445,7 @@ function startWorkoutTimers() {
   }, 1000);
 
   zoneTrackingTimer = setInterval(() => {
-    const hr = state.rowerData.heartrate;
+    const hr = state.hrData?.hr;
     if (hr && state.userSettings?.hrMax) {
       updateZoneTime(getCurrentHRZone(hr, state.userSettings.restHR, state.userSettings.hrMax));
     }
@@ -513,14 +519,16 @@ function buildWorkoutSummary() {
 }
 
 async function navigateTo(view) {
+  const prevView = state.view;
   state.view = view;
   const isWorkoutOrSummary = view === 'workout' || view === 'summary';
-  const wasWorkoutOrSummary = state.view === 'workout' || state.view === 'summary';
+  const wasWorkoutOrSummary = prevView === 'workout' || prevView === 'summary';
 
   if (isWorkoutOrSummary && !wasWorkoutOrSummary) await acquireWakeLock();
   else if (!isWorkoutOrSummary && wasWorkoutOrSummary) await releaseWakeLock();
 
   if (view !== 'workout' && view !== 'summary') cleanupWorkoutView();
+  if (prevView === 'home' && view !== 'home') cleanupHomeView();
   
   if (view === 'home' && state.workoutStatus === 'finished') {
     resetRowerData();
