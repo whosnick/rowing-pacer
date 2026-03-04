@@ -24,7 +24,7 @@ import {
 import { on, BUS } from './utils/telemetryBus.js';
 import { WorkoutFSM, WS, WE } from './utils/WorkoutFSM.js';
 import { initBuffer, pushStroke, finalizeBuffer } from './utils/telemetryBuffer.js';
-import { updateZoneTime, getZoneDistribution, resetZoneTracking } from './utils/zoneTracker.js';
+import { updateZoneTime, getZoneDistribution, resetZoneTracking, setCurrentHR } from './utils/zoneTracker.js';
 
 import { renderWorkoutView, updateWorkoutView, cleanupWorkoutView, renderReconnectOverlay, removeReconnectOverlay } from './components/WorkoutView.js';
 import renderHome, { cleanupHomeView } from './components/HomeView.js';
@@ -369,6 +369,7 @@ function setupBusSubscriptions() {
     on(BUS.HR_DATA, (data) => {
       state.hrData.hr = data.heartrate;
       state.hrConnected = true;
+      setCurrentHR(data.heartrate);
       if (state.userSettings?.hrMax) state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
       if (data.heartrate) state.peakHR = Math.max(state.peakHR || 0, data.heartrate);
       if (state.view === 'workout') updateWorkoutView(state);
@@ -398,6 +399,7 @@ function handleBusTick(data) {
 
   if (!isHRMonitorConnected() && data.heartrate !== null) {
     state.hrData.hr = data.heartrate;
+    setCurrentHR(data.heartrate);
     state.hrConnected = true;
     if (state.userSettings?.hrMax) state.hrData.zone = getCurrentHRZone(data.heartrate, state.userSettings.restHR, state.userSettings.hrMax);
   }
